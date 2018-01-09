@@ -139,6 +139,8 @@ namespace llvm {
 
   /// Basic register allocator.
   extern char &RABasicID;
+  extern char &RARLID;
+
 
   /// VirtRegRewriter pass. Rewrite virtual registers to physical registers as
   /// assigned in VirtRegMap.
@@ -163,6 +165,7 @@ namespace llvm {
   /// register allocator using the basic regalloc framework.
   ///
   FunctionPass *createBasicRegisterAllocator();
+  FunctionPass *createRLRegisterAllocator();
 
   /// Greedy register allocation pass - This pass implements a global register
   /// allocator for optimized builds.

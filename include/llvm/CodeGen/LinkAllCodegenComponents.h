@@ -33,6 +33,7 @@ namespace {
 
       (void) llvm::createFastRegisterAllocator();
       (void) llvm::createBasicRegisterAllocator();
+      (void) llvm::createRLRegisterAllocator();
       (void) llvm::createGreedyRegisterAllocator();
       (void) llvm::createDefaultPBQPRegisterAllocator();
 

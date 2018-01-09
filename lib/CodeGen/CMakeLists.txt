@@ -105,7 +105,10 @@ add_llvm_library(LLVMCodeGen
   PrologEpilogInserter.cpp
   PseudoSourceValue.cpp
   RegAllocBase.cpp
+  rl.cc
   RegAllocBasic.cpp
+  RegAllocRL.cpp
+  RegAllocRLImpl.cpp
   RegAllocFast.cpp
   RegAllocGreedy.cpp
   RegAllocPBQP.cpp
