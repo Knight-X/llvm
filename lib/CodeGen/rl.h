@@ -5,12 +5,13 @@
 #include <utility>
 #include <map>
 #include <vector>
+#include "llvm/ADT/SmallVector.h"
 
-
+using namespace llvm;
 
 class RandomPolicy {
   public:
-    int pick_action();
+    int pick_action(SmallVector<unsigned, 8>& cand);
 };
 
 
@@ -18,8 +19,7 @@ class QTable {
   public:
     float get(std::vector<float> state, int action);
     void set(std::vector<float> state, int action, float value);
-    std::pair<int, float> best(std::vector<float> state);
-  private:
+    std::pair<int, float> best(std::vector<float> state, SmallVector<unsigned, 8>& cand);
     std::map<std::pair<std::vector<float>, int>, float> _table;
 };
 
@@ -29,7 +29,7 @@ class GreedyQ {
   GreedyQ(QTable* q) {
     _q = q;
   }
-  int pick_action(std::vector<float> state);
+  int pick_action(std::vector<float> state, SmallVector<unsigned, 8>& cand);
 
   private:
     QTable* _q;
@@ -44,7 +44,7 @@ class EpsilonPolicy {
     _random = policy_b;
     _epsilon = epsilon;
   }
-  int pick_action(std::vector<float> state);
+  int pick_action(std::vector<float> state, SmallVector<unsigned, 8>& cand);
 
   private:
     GreedyQ* _greedy;
@@ -62,7 +62,7 @@ class QLearner {
       _gamma = discount_rate;
     }
 
-    void observe(std::vector<float>, int action, float reward, std::vector<float>);
+    void observe(std::vector<float>, int action, float reward, std::vector<float>, SmallVector<unsigned, 8>& cand);
   private:
    float _alpha;
    float _gamma; 

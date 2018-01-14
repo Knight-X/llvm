@@ -46,8 +46,8 @@ bool RegAllocRL::VerifyEnabled = false;
 
 bool RegAllocRL::terminalState = false;
 bool RegAllocRL::initialState = true;
-long int RegAllocRL::_score = 0;
 std::vector<float> RegAllocRL::_state(256, 0);
+long int RegAllocRL::_score = 0;
 float RegAllocRL::prev_weight = std::numeric_limits<float>::max();
 float RegAllocRL::curr_weight = 0.0;
 QTable RegAllocRL::g = QTable();
@@ -71,7 +71,7 @@ void RegAllocRL::init(VirtRegMap &vrm,
   RegClassInfo.runOnMachineFunction(vrm.getMachineFunction());
   learn = new QLearner(&g, 0.05, 0.1);
   q = new GreedyQ(&g);
-  policy = new EpsilonPolicy(q, &r, 0.5);
+  policy = new EpsilonPolicy(q, &r, 0.01);
 }
 
 // Visit all the live registers. If they are already assigned to a physical
@@ -91,9 +91,9 @@ void RegAllocRL::seedLiveRegs() {
 
 int RegAllocRL::calculateReward(unsigned action, float weight) {
   int reward = -1;
-  curr_weight += weight;
   
   if (weight >= 0.0) {
+    curr_weight += weight;
         if (curr_weight > prev_weight) {
 	  reward = -10000;
 	} else if (curr_weight == prev_weight && terminalState) {
@@ -107,6 +107,11 @@ int RegAllocRL::calculateReward(unsigned action, float weight) {
     reward -= 5;
   }
   _score += reward;
+  initialState = false;
+  std::cout << "weight: " << weight << std::endl;
+  std::cout << "prev_weight: " << prev_weight << std::endl;
+  std::cout << "curr_weight: " << curr_weight << std::endl;
+  std::cout << "score: " << _score << std::endl;
   return reward;
 }
 // Top-level driver to manage the queue of unassigned VirtRegs and call the

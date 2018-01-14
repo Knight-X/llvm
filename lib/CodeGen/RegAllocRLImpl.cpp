@@ -38,6 +38,7 @@
 #include <queue>
 #include <time.h>
 #include <stdlib.h>
+#include <fstream>
 
 using namespace llvm;
 
@@ -52,6 +53,87 @@ namespace {
       return A->weight < B->weight;
     }
   };
+}
+
+typedef std::map<std::pair<std::vector<float>, int>, float> stringMap;
+bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write Map
+{
+    std::ofstream ofile;
+    ofile.open(filename.c_str());
+    if(!ofile)
+    {
+        return false;           //file does not exist and cannot be created.
+    }
+
+    ofile << RegAllocRL::prev_weight << "\n";
+    ofile << RegAllocRL::curr_weight << "\n";
+    for(stringMap::const_iterator iter= fileMap.begin(); iter!=fileMap.end(); ++iter)
+    {
+
+	std::pair<std::vector<float>, int> first = iter->first;
+	
+	for (int i = 0; i < 256; i++) {
+	  ofile << first.first[i] << "&";  
+	}
+	ofile << first.second;
+	ofile<<"&"<<iter->second;
+        ofile<<"\n";
+    }
+    return true;
+}
+void splitString(std::vector<float> &v_str,const std::string &str,const char ch, int& reg, float& val)
+{
+	std::string sub;
+	std::string::size_type pos = 0;
+	std::string::size_type old_pos = 0;
+	bool flag=true;
+			     
+	int i = 0;
+	while(flag)
+	{
+		pos=str.find_first_of(ch,pos);
+		if(pos == std::string::npos)
+		{
+			flag = false;
+			pos = str.size();
+		}
+		std::string::size_type sz;
+		sub = str.substr(old_pos,pos-old_pos);  // Disregard the '.'
+		if (i < 256) {
+		float ret = std::atof(sub.c_str());
+		v_str.push_back(ret);
+		} else if (i == 256){
+		int ret = std::stoi(sub, &sz);
+		  reg = ret;
+		} else {
+		  int ret = std::atof(sub.c_str());
+		  val = ret;
+		}
+		old_pos = ++pos;
+		i++;
+	}
+}
+bool fileToMap(const std::string &filename, stringMap &fileMap)  //Read Map
+{
+	std::ifstream ifile;
+    ifile.open(filename.c_str());
+    if(!ifile)
+        return false;   //could not read the file.
+    std::string line;
+    std::string key;
+    ifile >> line;
+    std::string::size_type sz;
+    RegAllocRL::prev_weight = std::stof(line, &sz);
+    while(ifile>>line)
+    {
+        std::vector<float> v_str;
+        int reg = 0;
+        float val = 0.0;
+        splitString(v_str,line,'&', reg, val);
+        std::pair<std::vector<float>, int> a(v_str, reg);
+	fileMap[a] = val;
+    }
+    return true;
 }
 
 namespace {
@@ -77,7 +159,7 @@ class RARL : public MachineFunctionPass,
 
   bool LRE_CanEraseVirtReg(unsigned) override;
   void LRE_WillShrinkVirtReg(unsigned) override;
-
+  SmallVector<unsigned, 8> past_cand;
 public:
   RARL();
 
@@ -110,7 +192,7 @@ public:
 			 float& weight) override;
 
   std::vector<float> get(SmallVector<unsigned, 8> Cands, LiveInterval &VirtReg);
-  unsigned pickAction(std::vector<float> state);
+  unsigned pickAction(std::vector<float> state, SmallVector<unsigned, 8>& cand);
   void observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state);
   /// Perform register allocation.
   bool runOnMachineFunction(MachineFunction &mf) override;
@@ -222,8 +304,10 @@ bool RARL::spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
     Q.collectInterferingVRegs();
     for (unsigned i = Q.interferingVRegs().size(); i; --i) {
       LiveInterval *Intf = Q.interferingVRegs()[i - 1];
-      if (!Intf->isSpillable())
+      if (!Intf->isSpillable()) {
+	 std::cout << "can not spill " << std::endl;
         return false;
+      }
       Intfs.push_back(Intf);
     }
   }
@@ -270,6 +354,10 @@ std::vector<float> RARL::get(SmallVector<unsigned, 8> Cands, LiveInterval &VirtR
 		ret[PhysReg] += Intf->weight;
 	    }
           }
+	  float max = std::numeric_limits<float>::max();
+	if (ret[PhysReg] < -max) {
+	  ret[PhysReg] = 0.0;
+	}
       } else {
         break;
       }
@@ -278,15 +366,15 @@ std::vector<float> RARL::get(SmallVector<unsigned, 8> Cands, LiveInterval &VirtR
   return ret;
 }
 
-unsigned RARL::pickAction(std::vector<float> state) {
+unsigned RARL::pickAction(std::vector<float> state, SmallVector<unsigned, 8>& cand) {
 
-  unsigned action = policy->pick_action(state);
+  unsigned action = policy->pick_action(state, cand);
   return action;
 }
 
 
 void RARL::observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state) {
-  learn->observe(old_state, action, reward, new_state);
+  learn->observe(old_state, action, reward, new_state, past_cand);
 }
 
 // Driver for the register assignment and splitting heuristics.
@@ -316,7 +404,9 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
     switch (Matrix->checkInterference(VirtReg, PhysReg)) {
     case LiveRegMatrix::IK_Free:
       // PhysReg is available, allocate it.
-      return PhysReg;
+      //return PhysReg;
+      PhysRegSpillCands.push_back(PhysReg);
+      continue;
 
     case LiveRegMatrix::IK_VirtReg:
       // Only virtual registers in the way, we may be able to spill them.
@@ -329,18 +419,21 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
     }
   }
   std::vector<float> new_state = get(PhysRegSpillCands, VirtReg);
+  while (!PhysRegSpillCands.empty()) {
 
-  if (initialState) {
-    initialState = false;
-  } else {
+  if(!initialState){
     observe(_state, prev_action, prev_reward, new_state);
+    initialState = false;
   }
 
 
-
-  unsigned physReg = pickAction(new_state);
+  past_cand = PhysRegSpillCands;
+  unsigned physReg = pickAction(new_state, PhysRegSpillCands);
   weight = new_state[physReg];
   _state = new_state;
+  if (Matrix->checkInterference(VirtReg, physReg) == LiveRegMatrix::IK_Free) {
+      return physReg;
+  }
   // Try to spill another interfering reg with less spill weight.
   if (spillInterferences(VirtReg, physReg, SplitVRegs)) {
 
@@ -349,6 +442,9 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
     // Tell the caller to allocate to this newly freed physical register.
     return physReg;
   }
+  prev_reward = calculateReward(physReg, -1.0);
+  prev_action = physReg;
+}
 
   // No other spill candidates were found, so spill the current VirtReg.
   DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
@@ -377,12 +473,17 @@ bool RARL::runOnMachineFunction(MachineFunction &mf) {
                                 getAnalysis<MachineBlockFrequencyInfo>());
 
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM));
+  if (initialState) {
+  fileToMap("go.txt", g._table);
+  }
 
   allocatePhysRegs();
   postOptimization();
 
   // Diagnostic output before rewriting
   DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
+  mapToFile("go.txt", g._table);
+  std::cout << curr_weight << std::endl;
 
   releaseMemory();
   return true;

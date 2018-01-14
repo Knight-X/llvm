@@ -130,10 +130,10 @@ public:
   static long int _score;
   static float prev_weight;
   static std::vector<float> _state;
+  static float curr_weight;
 
 private:
   void seedLiveRegs();
-  static float curr_weight;
 };
 
 } // end namespace llvm
