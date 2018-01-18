@@ -47,7 +47,7 @@ bool RegAllocRL::VerifyEnabled = false;
 bool RegAllocRL::terminalState = false;
 bool RegAllocRL::initialState = true;
 bool RegAllocRL::inference = false;
-std::vector<float> RegAllocRL::_state(256, 0);
+std::vector<int> RegAllocRL::_state(257, 0);
 long int RegAllocRL::_score = 0;
 float RegAllocRL::prev_weight = std::numeric_limits<float>::max();
 float RegAllocRL::curr_weight = 0.0;
@@ -113,8 +113,8 @@ int RegAllocRL::calculateReward(unsigned action, float weight) {
   std::cout << "score: " << _score << std::endl;
   return reward;
 }
-void RegAllocRL::observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state) {
-  if (old_state.size() != 256 || new_state.size() != 256) {
+void RegAllocRL::observe(std::vector<int> old_state, unsigned action, float reward, std::vector<int> new_state) {
+  if (old_state.size() != 257 || new_state.size() != 257) {
         report_fatal_error("wrong size");
   }
   learn->observe(old_state, action, reward, new_state, past_cand);
@@ -206,7 +206,8 @@ void RegAllocRL::allocatePhysRegs() {
   terminalState = true;
   prev_reward = calculateReward(prev_action, 0.0);
   if (!inference) {
-  observe(_state, prev_action, prev_reward, std::vector<float>(256, 0));
+  observe(_state, prev_action, prev_reward, std::vector<int>(257, 0));
+  std::cout << "basic block allocate finish " << std::endl;
   }
 }
 

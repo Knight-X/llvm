@@ -32,11 +32,11 @@ int RandomPolicy::pick_action(SmallVector<unsigned, 8>& cand) {
     return ret;
 }
 
-int GreedyQ::pick_action(std::vector<float> state, SmallVector<unsigned, 8>& cand) {
+int GreedyQ::pick_action(std::vector<int> state, SmallVector<unsigned, 8>& cand) {
     return _q->best(state, cand).first;
 }
 
-int EpsilonPolicy::pick_action(std::vector<float> state, SmallVector<unsigned, 8>& cand) {
+int EpsilonPolicy::pick_action(std::vector<int> state, SmallVector<unsigned, 8>& cand) {
 	srand(time(NULL));
 	float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
     if (r < _epsilon)
@@ -45,19 +45,19 @@ int EpsilonPolicy::pick_action(std::vector<float> state, SmallVector<unsigned, 8
       return _greedy->pick_action(state, cand);
 }
 
-float QTable::get(std::vector<float> state, int action) {
-   std::pair<std::vector<float>, int> n_state = std::make_pair(state, action);
+float QTable::get(std::vector<int> state, int action) {
+   std::pair<std::vector<int>, int> n_state = std::make_pair(state, action);
     return _table[n_state];
 }
 
 
-void QTable::set(std::vector<float> state, int action, float value) {
-  std::pair<std::vector<float>, int> n_state = std::make_pair(state, action);
+void QTable::set(std::vector<int> state, int action, float value) {
+  std::pair<std::vector<int>, int> n_state = std::make_pair(state, action);
   _table[n_state] = value;
 }
 
 
-std::pair<int, float>  QTable::best(std::vector<float> state, SmallVector<unsigned, 8>& cand) {
+std::pair<int, float>  QTable::best(std::vector<int> state, SmallVector<unsigned, 8>& cand) {
   float best_value = -std::numeric_limits<float>::max();
   int best_action = 0;
   int index = -1;
@@ -76,7 +76,7 @@ std::pair<int, float>  QTable::best(std::vector<float> state, SmallVector<unsign
 }
 
 
-void QLearner::observe(std::vector<float> old_state, int action, float reward, std::vector<float> new_state, SmallVector<unsigned, 8>& cand) {
+void QLearner::observe(std::vector<int> old_state, int action, float reward, std::vector<int> new_state, SmallVector<unsigned, 8>& cand) {
   float prev = _q->get(old_state, action);
   _q->set(old_state, action, prev + _alpha * (
         reward + _gamma * _q->best(new_state, cand).second - prev));
