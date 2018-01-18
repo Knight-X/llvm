@@ -25,6 +25,7 @@ void BasicBlock::_draw() {
 
 
 int RandomPolicy::pick_action(SmallVector<unsigned, 8>& cand) {
+    srand(time(NULL));
     int i = rand() % cand.size();
     int ret = cand[i];
     cand.erase(cand.begin() + i);
@@ -36,6 +37,7 @@ int GreedyQ::pick_action(std::vector<float> state, SmallVector<unsigned, 8>& can
 }
 
 int EpsilonPolicy::pick_action(std::vector<float> state, SmallVector<unsigned, 8>& cand) {
+	srand(time(NULL));
 	float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
     if (r < _epsilon)
       return _random->pick_action(cand);

@@ -121,16 +121,19 @@ protected:
 
   /// Method called when the allocator is about to remove a LiveInterval.
   virtual void aboutToRemoveInterval(LiveInterval &LI) {}
+  void observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state);
 
 public:
   /// VerifyEnabled - True when -verify-regalloc is given.
   static bool VerifyEnabled;
   static bool terminalState;
   static bool initialState;
+  static bool inference;
   static long int _score;
   static float prev_weight;
   static std::vector<float> _state;
   static float curr_weight;
+  SmallVector<unsigned, 8> past_cand;
 
 private:
   void seedLiveRegs();

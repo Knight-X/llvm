@@ -46,6 +46,7 @@ bool RegAllocRL::VerifyEnabled = false;
 
 bool RegAllocRL::terminalState = false;
 bool RegAllocRL::initialState = true;
+bool RegAllocRL::inference = false;
 std::vector<float> RegAllocRL::_state(256, 0);
 long int RegAllocRL::_score = 0;
 float RegAllocRL::prev_weight = std::numeric_limits<float>::max();
@@ -69,7 +70,7 @@ void RegAllocRL::init(VirtRegMap &vrm,
   Matrix = &mat;
   MRI->freezeReservedRegs(vrm.getMachineFunction());
   RegClassInfo.runOnMachineFunction(vrm.getMachineFunction());
-  learn = new QLearner(&g, 0.05, 0.1);
+  learn = new QLearner(&g, 0.001, 0.1);
   q = new GreedyQ(&g);
   policy = new EpsilonPolicy(q, &r, 0.01);
 }
@@ -94,14 +95,12 @@ int RegAllocRL::calculateReward(unsigned action, float weight) {
   
   if (weight >= 0.0) {
     curr_weight += weight;
-        if (curr_weight > prev_weight) {
+        if (curr_weight >= prev_weight * 1.2 && terminalState) {
 	  reward = -10000;
-	} else if (curr_weight == prev_weight && terminalState) {
-		reward = 5;
+	} else if (curr_weight >= prev_weight * 1.5 && terminalState) {
+	  reward = -20000;
 	} else if (curr_weight < prev_weight && terminalState) {
 		reward = 10000;
-	} else if (curr_weight <= prev_weight) {
-		reward = 5;
 	}
   } else {
     reward -= 5;
@@ -114,6 +113,13 @@ int RegAllocRL::calculateReward(unsigned action, float weight) {
   std::cout << "score: " << _score << std::endl;
   return reward;
 }
+void RegAllocRL::observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state) {
+  if (old_state.size() != 256 || new_state.size() != 256) {
+        report_fatal_error("wrong size");
+  }
+  learn->observe(old_state, action, reward, new_state, past_cand);
+}
+
 // Top-level driver to manage the queue of unassigned VirtRegs and call the
 // selectOrSplit implementation.
 void RegAllocRL::allocatePhysRegs() {
@@ -196,6 +202,11 @@ void RegAllocRL::allocatePhysRegs() {
       enqueue(SplitVirtReg);
       ++NumNewQueued;
     }
+  }
+  terminalState = true;
+  prev_reward = calculateReward(prev_action, 0.0);
+  if (!inference) {
+  observe(_state, prev_action, prev_reward, std::vector<float>(256, 0));
   }
 }
 

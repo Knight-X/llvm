@@ -16,6 +16,7 @@
 #include "LiveDebugVariables.h"
 #include "RegAllocRL.h"
 #include "Spiller.h"
+#include <iomanip>
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -65,6 +66,7 @@ bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write
         return false;           //file does not exist and cannot be created.
     }
 
+    ofile << "0" << "\n";
     ofile << RegAllocRL::prev_weight << "\n";
     ofile << RegAllocRL::curr_weight << "\n";
     for(stringMap::const_iterator iter= fileMap.begin(); iter!=fileMap.end(); ++iter)
@@ -73,10 +75,10 @@ bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write
 	std::pair<std::vector<float>, int> first = iter->first;
 	
 	for (int i = 0; i < 256; i++) {
-	  ofile << first.first[i] << "&";  
+	  ofile << std::setprecision(3) << first.first[i] << "&";  
 	}
 	ofile << first.second;
-	ofile<<"&"<<iter->second;
+	ofile<<"&"<< std::setprecision(3) << iter->second;
         ofile<<"\n";
     }
     return true;
@@ -100,13 +102,13 @@ void splitString(std::vector<float> &v_str,const std::string &str,const char ch,
 		std::string::size_type sz;
 		sub = str.substr(old_pos,pos-old_pos);  // Disregard the '.'
 		if (i < 256) {
-		float ret = std::atof(sub.c_str());
+		float ret = std::stof(sub.c_str());
 		v_str.push_back(ret);
 		} else if (i == 256){
 		int ret = std::stoi(sub, &sz);
 		  reg = ret;
 		} else {
-		  int ret = std::atof(sub.c_str());
+		  int ret = std::stof(sub.c_str());
 		  val = ret;
 		}
 		old_pos = ++pos;
@@ -121,6 +123,11 @@ bool fileToMap(const std::string &filename, stringMap &fileMap)  //Read Map
         return false;   //could not read the file.
     std::string line;
     std::string key;
+    ifile >> line;
+    if (line == "1") {
+	    RegAllocRL::inference = true;
+    }
+
     ifile >> line;
     std::string::size_type sz;
     RegAllocRL::prev_weight = std::stof(line, &sz);
@@ -159,7 +166,6 @@ class RARL : public MachineFunctionPass,
 
   bool LRE_CanEraseVirtReg(unsigned) override;
   void LRE_WillShrinkVirtReg(unsigned) override;
-  SmallVector<unsigned, 8> past_cand;
 public:
   RARL();
 
@@ -193,7 +199,6 @@ public:
 
   std::vector<float> get(SmallVector<unsigned, 8> Cands, LiveInterval &VirtReg);
   unsigned pickAction(std::vector<float> state, SmallVector<unsigned, 8>& cand);
-  void observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state);
   /// Perform register allocation.
   bool runOnMachineFunction(MachineFunction &mf) override;
 
@@ -208,6 +213,10 @@ public:
   bool spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
                           SmallVectorImpl<unsigned> &SplitVRegs);
 
+bool doFinalization(Module &M) override {
+  std::cout << "finialize" << std::endl;
+  return true;
+}
   static char ID;
 };
 
@@ -354,10 +363,6 @@ std::vector<float> RARL::get(SmallVector<unsigned, 8> Cands, LiveInterval &VirtR
 		ret[PhysReg] += Intf->weight;
 	    }
           }
-	  float max = std::numeric_limits<float>::max();
-	if (ret[PhysReg] < -max) {
-	  ret[PhysReg] = 0.0;
-	}
       } else {
         break;
       }
@@ -367,15 +372,14 @@ std::vector<float> RARL::get(SmallVector<unsigned, 8> Cands, LiveInterval &VirtR
 }
 
 unsigned RARL::pickAction(std::vector<float> state, SmallVector<unsigned, 8>& cand) {
+  if (state.size() != 256) {
+	  report_fatal_error("wrong size");
+  }
 
   unsigned action = policy->pick_action(state, cand);
   return action;
 }
 
-
-void RARL::observe(std::vector<float> old_state, unsigned action, float reward, std::vector<float> new_state) {
-  learn->observe(old_state, action, reward, new_state, past_cand);
-}
 
 // Driver for the register assignment and splitting heuristics.
 // Manages iteration over the LiveIntervalUnions.
@@ -421,7 +425,7 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
   std::vector<float> new_state = get(PhysRegSpillCands, VirtReg);
   while (!PhysRegSpillCands.empty()) {
 
-  if(!initialState){
+  if(!initialState && !inference){
     observe(_state, prev_action, prev_reward, new_state);
     initialState = false;
   }
@@ -483,6 +487,7 @@ bool RARL::runOnMachineFunction(MachineFunction &mf) {
   // Diagnostic output before rewriting
   DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
   mapToFile("go.txt", g._table);
+  terminalState = false;
   std::cout << curr_weight << std::endl;
 
   releaseMemory();
