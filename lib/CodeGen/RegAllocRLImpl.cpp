@@ -428,7 +428,8 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
     }
   }
   std::vector<float> weight_state = get(PhysRegSpillCands, VirtReg, new_state);
-  while (!PhysRegSpillCands.empty()) {
+  bool tmp = PhysRegSpillCands.empty();
+  while (!tmp) {
 
   if(!initialState && !inference){
     observe(_state, prev_action, prev_reward, new_state);
@@ -457,10 +458,16 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
 
   // No other spill candidates were found, so spill the current VirtReg.
   DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
+  // should update physical register in new_state 
+  new_state[VirtReg.reg + 1] = 2;
   if (!VirtReg.isSpillable())
     return ~0u;
   LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
   spiller().spill(LRE);
+  past_cand = PhysRegSpillCands;
+  PhysRegSpillCands.push_back(VirtReg.reg);
+  weight = VirtReg.weight;
+  _state = new_state;
 
   // The live virtual register requesting allocation was spilled, so tell
   // the caller not to allocate anything during this round.

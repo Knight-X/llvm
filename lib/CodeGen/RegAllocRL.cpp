@@ -182,7 +182,12 @@ void RegAllocRL::allocatePhysRegs() {
       Matrix->assign(*VirtReg, AvailablePhysReg);
       prev_reward = calculateReward(AvailablePhysReg, weight);
       prev_action = AvailablePhysReg;
+    } else if (AvailablePhysReg == 0) {
+      prev_reward = calculateReward(VirtReg->reg, weight);
+      prev_action = AvailablePhysReg;
+      std::cout << "should be spill itself and reward" << std::endl;
     }
+    
 
     for (unsigned Reg : SplitVRegs) {
       assert(LIS->hasInterval(Reg));
