@@ -41,6 +41,7 @@
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "rl.h"
 
+typedef std::map<std::pair<std::vector<int>, int>, float> stringMap;
 namespace llvm {
 
 class LiveInterval;
@@ -128,6 +129,7 @@ public:
   static bool VerifyEnabled;
   static bool terminalState;
   static bool initialState;
+  static bool readFile;
   static bool inference;
   static long int _score;
   static float prev_weight;

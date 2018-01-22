@@ -56,7 +56,6 @@ namespace {
   };
 }
 
-typedef std::map<std::pair<std::vector<int>, int>, float> stringMap;
 bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write Map
 {
     std::ofstream ofile;
@@ -64,6 +63,9 @@ bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write
     if(!ofile)
     {
         return false;           //file does not exist and cannot be created.
+    }
+    if (fileMap.size() == 0) {
+	 return false;
     }
 
     ofile << "0" << "\n";
@@ -75,10 +77,14 @@ bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write
 	std::pair<std::vector<int>, int> first = iter->first;
 	
 	for (int i = 0; i < 257; i++) {
-	  ofile << std::setprecision(3) << first.first[i] << "&";  
+	  if (i > 0 && (first.first[i] > 2 || first.first[i] < 0)) {
+	  report_fatal_error("wrong message");
+	  }
+	  ofile << first.first[i] << "&";  
+	  
 	}
 	ofile << first.second;
-	ofile<<"&"<< std::setprecision(3) << iter->second;
+	ofile<<"&"<< iter->second;
         ofile<<"\n";
     }
     return true;
@@ -121,8 +127,14 @@ bool fileToMap(const std::string &filename, stringMap &fileMap)  //Read Map
     ifile.open(filename.c_str());
     if(!ifile)
         return false;   //could not read the file.
+    ifile.seekg (0, ifile.end);
+    size_t len = ifile.tellg();
+    if (len == 0) {
+	 return false;
+    }
     std::string line;
     std::string key;
+    ifile.seekg (0, ifile.beg);
     ifile >> line;
     if (line == "1") {
 	    RegAllocRL::inference = true;
@@ -376,6 +388,11 @@ unsigned RARL::pickAction(std::vector<int> state, SmallVector<unsigned, 8>& cand
   if (state.size() != 257) {
 	  report_fatal_error("wrong size");
   }
+  	for (int i = 0; i < state.size(); i++) {
+	  if (i > 0 && (state[i] > 2 || state[i] < 0)) {
+	  report_fatal_error("pick message");
+	  }
+	}
 
   unsigned action = policy->pick_action(state, cand);
   return action;
@@ -428,46 +445,50 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
     }
   }
   std::vector<float> weight_state = get(PhysRegSpillCands, VirtReg, new_state);
-  bool tmp = PhysRegSpillCands.empty();
-  while (!tmp) {
+  while (!PhysRegSpillCands.empty()) {
 
+    if(!initialState && !inference){
+      observe(_state, prev_action, prev_reward, new_state);
+      initialState = false;
+    }
+
+
+    past_cand = PhysRegSpillCands;
+    unsigned physReg = pickAction(new_state, PhysRegSpillCands);
+    weight = weight_state[physReg];
+    _state = new_state;
+    if (Matrix->checkInterference(VirtReg, physReg) == LiveRegMatrix::IK_Free) {
+      return physReg;
+    }
+  // Try to spill another interfering reg with less spill weight.
+    if (spillInterferences(VirtReg, physReg, SplitVRegs)) {
+
+      assert(!Matrix->checkInterference(VirtReg, physReg) &&
+           "Interference after spill.");
+    // Tell the caller to allocate to this newly freed physical register.
+      return physReg;
+    }
+    prev_reward = calculateReward(physReg, -1.0);
+    prev_action = physReg;
+  }
+
+  // No other spill candidates were found, so spill the current VirtReg.
+  DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
+  if (!VirtReg.isSpillable())
+    return ~0u;
+  // should update physical register in new_state 
   if(!initialState && !inference){
     observe(_state, prev_action, prev_reward, new_state);
     initialState = false;
   }
-
-
+  unsigned itreg = VRM->getPhys(VirtReg.reg);
+  PhysRegSpillCands.push_back(itreg);
   past_cand = PhysRegSpillCands;
-  unsigned physReg = pickAction(new_state, PhysRegSpillCands);
-  weight = weight_state[physReg];
-  _state = new_state;
-  if (Matrix->checkInterference(VirtReg, physReg) == LiveRegMatrix::IK_Free) {
-      return physReg;
-  }
-  // Try to spill another interfering reg with less spill weight.
-  if (spillInterferences(VirtReg, physReg, SplitVRegs)) {
-
-    assert(!Matrix->checkInterference(VirtReg, physReg) &&
-           "Interference after spill.");
-    // Tell the caller to allocate to this newly freed physical register.
-    return physReg;
-  }
-  prev_reward = calculateReward(physReg, -1.0);
-  prev_action = physReg;
-}
-
-  // No other spill candidates were found, so spill the current VirtReg.
-  DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
-  // should update physical register in new_state 
-  new_state[VirtReg.reg + 1] = 2;
-  if (!VirtReg.isSpillable())
-    return ~0u;
-  LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-  spiller().spill(LRE);
-  past_cand = PhysRegSpillCands;
-  PhysRegSpillCands.push_back(VirtReg.reg);
+  new_state[itreg + 1] = 2;
   weight = VirtReg.weight;
   _state = new_state;
+  LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+  spiller().spill(LRE);
 
   // The live virtual register requesting allocation was spilled, so tell
   // the caller not to allocate anything during this round.
@@ -489,8 +510,9 @@ bool RARL::runOnMachineFunction(MachineFunction &mf) {
                                 getAnalysis<MachineBlockFrequencyInfo>());
 
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM));
-  if (initialState) {
+  if (readFile) {
   fileToMap("go.txt", g._table);
+  readFile = false;
   }
 
   allocatePhysRegs();

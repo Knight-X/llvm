@@ -46,6 +46,7 @@ bool RegAllocRL::VerifyEnabled = false;
 
 bool RegAllocRL::terminalState = false;
 bool RegAllocRL::initialState = true;
+bool RegAllocRL::readFile = true;
 bool RegAllocRL::inference = false;
 std::vector<int> RegAllocRL::_state(257, 0);
 long int RegAllocRL::_score = 0;
@@ -126,9 +127,11 @@ void RegAllocRL::allocatePhysRegs() {
   seedLiveRegs();
   unsigned prev_action = 0;
   int prev_reward = 0;
+  bool hasVir = false;
 
   // Continue assigning vregs one at a time to available physical registers.
   while (LiveInterval *VirtReg = dequeue()) {
+    hasVir = true;
     assert(!VRM->hasPhys(VirtReg->reg) && "Register already assigned");
 
     // Unused registers can appear when the spiller coalesces snippets.
@@ -208,11 +211,13 @@ void RegAllocRL::allocatePhysRegs() {
       ++NumNewQueued;
     }
   }
+  if (hasVir) {
   terminalState = true;
   prev_reward = calculateReward(prev_action, 0.0);
   if (!inference) {
   observe(_state, prev_action, prev_reward, std::vector<int>(257, 0));
   std::cout << "basic block allocate finish " << std::endl;
+  }
   }
 }
 
