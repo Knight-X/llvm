@@ -71,6 +71,7 @@ bool mapToFile(const std::string &filename,const stringMap &fileMap)     //Write
     ofile << "0" << "\n";
     ofile << RegAllocRL::prev_weight << "\n";
     ofile << RegAllocRL::curr_weight << "\n";
+    ofile << RegAllocRL::_score << "\n";
     for(stringMap::const_iterator iter= fileMap.begin(); iter!=fileMap.end(); ++iter)
     {
 
@@ -476,11 +477,13 @@ unsigned RARL::selectOrSplit(LiveInterval &VirtReg,
   DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
   if (!VirtReg.isSpillable())
     return ~0u;
+  std::cout << "last one " << std::endl;
   // should update physical register in new_state 
   if(!initialState && !inference){
     observe(_state, prev_action, prev_reward, new_state);
     initialState = false;
   }
+  std::cout << "last two " << std::endl;
   unsigned itreg = VRM->getPhys(VirtReg.reg);
   PhysRegSpillCands.push_back(itreg);
   past_cand = PhysRegSpillCands;
@@ -500,6 +503,7 @@ bool RARL::runOnMachineFunction(MachineFunction &mf) {
                << "********** Function: "
                << mf.getName() << '\n');
 
+  std::cout << "fun init " << std::endl;
   MF = &mf;
   RegAllocRL::init(getAnalysis<VirtRegMap>(),
                      getAnalysis<LiveIntervals>(),
@@ -522,7 +526,9 @@ bool RARL::runOnMachineFunction(MachineFunction &mf) {
   DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
   mapToFile("go.txt", g._table);
   terminalState = false;
+  initialState = true;
   std::cout << curr_weight << std::endl;
+  std::cout << "basic block allocate finish " << std::endl;
 
   releaseMemory();
   return true;

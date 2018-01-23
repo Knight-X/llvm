@@ -135,7 +135,7 @@ public:
   static float prev_weight;
   static std::vector<int> _state;
   static float curr_weight;
-  SmallVector<unsigned, 8> past_cand;
+  static SmallVector<unsigned, 8> past_cand;
 
 private:
   void seedLiveRegs();

@@ -53,6 +53,7 @@ long int RegAllocRL::_score = 0;
 float RegAllocRL::prev_weight = std::numeric_limits<float>::max();
 float RegAllocRL::curr_weight = 0.0;
 QTable RegAllocRL::g = QTable();
+SmallVector<unsigned, 8> RegAllocRL::past_cand = SmallVector<unsigned, 8>();
 
 //===----------------------------------------------------------------------===//
 //                         RegAllocBase Implementation
@@ -96,19 +97,19 @@ int RegAllocRL::calculateReward(unsigned action, float weight) {
   
   if (weight >= 0.0) {
     curr_weight += weight;
-        if (curr_weight >= prev_weight * 1.2 && terminalState) {
-	  reward = -10000;
-	} else if (curr_weight >= prev_weight * 1.5 && terminalState) {
-	  reward = -20000;
-	} else if (curr_weight < prev_weight && terminalState) {
-		reward = 10000;
+	if (curr_weight == 0.0 && terminalState) {
+		reward = 100;
+	} else {
+	  reward = -(500 * curr_weight);
 	}
-  } else {
-    reward -= 5;
-  }
   _score += reward;
+  } else {
+    reward = -1;
+  }
   initialState = false;
+  std::cout << "can size: " << past_cand.size() << std::endl;
   std::cout << "weight: " << weight << std::endl;
+  std::cout << "reward: " << reward << std::endl;
   std::cout << "prev_weight: " << prev_weight << std::endl;
   std::cout << "curr_weight: " << curr_weight << std::endl;
   std::cout << "score: " << _score << std::endl;
@@ -118,6 +119,7 @@ void RegAllocRL::observe(std::vector<int> old_state, unsigned action, float rewa
   if (old_state.size() != 257 || new_state.size() != 257) {
         report_fatal_error("wrong size");
   }
+	  
   learn->observe(old_state, action, reward, new_state, past_cand);
 }
 
@@ -132,6 +134,7 @@ void RegAllocRL::allocatePhysRegs() {
   // Continue assigning vregs one at a time to available physical registers.
   while (LiveInterval *VirtReg = dequeue()) {
     hasVir = true;
+    std::cout << "has virt reg " << std::endl;
     assert(!VRM->hasPhys(VirtReg->reg) && "Register already assigned");
 
     // Unused registers can appear when the spiller coalesces snippets.
@@ -215,8 +218,8 @@ void RegAllocRL::allocatePhysRegs() {
   terminalState = true;
   prev_reward = calculateReward(prev_action, 0.0);
   if (!inference) {
+	  std::cout << "phys finish" << std::endl;
   observe(_state, prev_action, prev_reward, std::vector<int>(257, 0));
-  std::cout << "basic block allocate finish " << std::endl;
   }
   }
 }
