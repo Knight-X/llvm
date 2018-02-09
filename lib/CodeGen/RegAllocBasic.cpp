@@ -16,6 +16,8 @@
 #include "LiveDebugVariables.h"
 #include "RegAllocBase.h"
 #include "Spiller.h"
+#include <iostream>
+#include <fstream>
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -38,18 +40,41 @@
 #include <queue>
 
 using namespace llvm;
+typedef std::map<unsigned, std::set<std::pair<int, int>>> commap;
 
 #define DEBUG_TYPE "regalloc"
 
 static RegisterRegAlloc basicRegAlloc("basic", "basic register allocator",
                                       createBasicRegisterAllocator);
 
+static float weight = 0.0;
 namespace {
   struct CompSpillWeight {
     bool operator()(LiveInterval *A, LiveInterval *B) const {
       return A->weight < B->weight;
     }
   };
+}
+bool mapToFile(const std::string &filename, commap &store)     //Write Map
+{
+    std::ofstream ofile;
+    ofile.open(filename.c_str());
+    if(!ofile)
+    {
+        return false;           //file does not exist and cannot be created.
+    }
+    if (store.size() == 0) {
+	 return false;
+    }
+    for (commap::iterator it=store.begin(); it!=store.end(); ++it) {
+        ofile << it->first;
+	for(auto iter : it->second) {
+	  ofile << "&" << iter.first << "&" << iter.second;
+	}
+	ofile<< "\n";
+    }	
+
+    return true;
 }
 
 namespace {
@@ -85,6 +110,8 @@ public:
   /// RABasic analysis usage.
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
+  void printPhysic();
+
   void releaseMemory() override;
 
   Spiller &spiller() override { return *SpillerInstance; }
@@ -103,6 +130,10 @@ public:
 
   unsigned selectOrSplit(LiveInterval &VirtReg,
                          SmallVectorImpl<unsigned> &SplitVRegs) override;
+bool doFinalization(Module &M) override {
+  std::cout << "finalize: " << weight << std::endl;
+  return true;
+}
 
   /// Perform register allocation.
   bool runOnMachineFunction(MachineFunction &mf) override;
@@ -156,7 +187,42 @@ bool RABasic::LRE_CanEraseVirtReg(unsigned VirtReg) {
   LI.clear();
   return false;
 }
+static int iteration = 0;
+void RABasic::printPhysic() {
+    std::cout << "new state: " << std::to_string(iteration) << std::endl;
+    LiveIntervalUnion *Q = Matrix->getLiveUnions();
+    const TargetRegisterInfo *TRI = &VRM->getTargetRegInfo();
+    std::map<unsigned, std::set<std::pair<int, int>>> store;
+    for (unsigned i = 0; i < TRI->getNumRegClasses(); i++) {
+      const TargetRegisterClass* g = TRI->getRegClass(i);
+      ArrayRef<MCPhysReg> group = RegClassInfo.getOrder(g);
+      for (unsigned index = 0; index < group.size(); index++){
+	unsigned PhysReg = group[index];
+        for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
+	  IntervalMap<SlotIndex, LiveInterval*>::const_iterator LiveUnionI;
+	  LiveUnionI.setMap(Q[*Units].getMap());
+	  LiveUnionI.goToBegin();
+	  while (LiveUnionI.valid()) {
+	    store[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint()));
+          //std::cout << "start: " << LiveUnionI.start().getint() << "end: " << LiveUnionI.stop().getint()<< std::endl;
+	  LiveUnionI++;
+	  }
+        }
+      }
+    }
+    /*for (std::map<unsigned, std::set<std::pair<int, int>>>::iterator it=store.begin(); it!=store.end(); ++it) {
+        std::cout << "phys reg: " << it->first << std::endl;
+	for(auto iter : it->second) {
+	  std::cout << "start: " << iter.first << "stop: " << iter.second << " ";
+	}
+	std::cout << std::endl;
+    }	
+    std::cout << std::endl;*/
+    std::string file = "go" + std::to_string(iteration) + ".txt";
+    mapToFile(file, store);
+    iteration++;
 
+}
 void RABasic::LRE_WillShrinkVirtReg(unsigned VirtReg) {
   if (!VRM->hasPhys(VirtReg))
     return;
@@ -198,7 +264,6 @@ void RABasic::releaseMemory() {
   SpillerInstance.reset();
 }
 
-
 // Spill or split all live virtual registers currently unified under PhysReg
 // that interfere with VirtReg. The newly spilled or split live intervals are
 // returned by appending them to SplitVRegs.
@@ -237,6 +302,7 @@ bool RABasic::spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
 
     // Spill the extracted interval.
     LiveRangeEdit LRE(&Spill, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+    weight += Spill.weight;
     spiller().spill(LRE);
   }
   return true;
@@ -261,6 +327,7 @@ unsigned RABasic::selectOrSplit(LiveInterval &VirtReg,
 
   // Check for an available register in this class.
   AllocationOrder Order(VirtReg.reg, *VRM, RegClassInfo, Matrix);
+  printPhysic();
   while (unsigned PhysReg = Order.next()) {
     // Check for interference in PhysReg
     switch (Matrix->checkInterference(VirtReg, PhysReg)) {
@@ -296,6 +363,7 @@ unsigned RABasic::selectOrSplit(LiveInterval &VirtReg,
   if (!VirtReg.isSpillable())
     return ~0u;
   LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+  weight += VirtReg.weight;
   spiller().spill(LRE);
 
   // The live virtual register requesting allocation was spilled, so tell
@@ -308,6 +376,7 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
                << "********** Function: "
                << mf.getName() << '\n');
 
+  std::cout << "new function" << std::endl;
   MF = &mf;
   RegAllocBase::init(getAnalysis<VirtRegMap>(),
                      getAnalysis<LiveIntervals>(),
@@ -326,6 +395,7 @@ bool RABasic::runOnMachineFunction(MachineFunction &mf) {
   DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
 
   releaseMemory();
+  std::cout << "function end" << std::to_string(iteration) << std::endl;
   return true;
 }
 
