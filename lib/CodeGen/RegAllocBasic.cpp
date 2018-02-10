@@ -110,7 +110,7 @@ public:
   /// RABasic analysis usage.
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  void printPhysic();
+  void printPhysic(LiveRange& vreg);
 
   void releaseMemory() override;
 
@@ -188,7 +188,7 @@ bool RABasic::LRE_CanEraseVirtReg(unsigned VirtReg) {
   return false;
 }
 static int iteration = 0;
-void RABasic::printPhysic() {
+void RABasic::printPhysic(LiveRange& vreg) {
     std::cout << "new state: " << std::to_string(iteration) << std::endl;
     LiveIntervalUnion *Q = Matrix->getLiveUnions();
     const TargetRegisterInfo *TRI = &VRM->getTargetRegInfo();
@@ -203,6 +203,8 @@ void RABasic::printPhysic() {
 	  LiveUnionI.setMap(Q[*Units].getMap());
 	  LiveUnionI.goToBegin();
 	  while (LiveUnionI.valid()) {
+		  LiveRange::const_iterator LRI = vreg.begin();
+	    if (LiveUnionI.start() > LRI->start && LiveUnionI.start().getint() < LRI->start.getint() + 246)
 	    store[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint()));
           //std::cout << "start: " << LiveUnionI.start().getint() << "end: " << LiveUnionI.stop().getint()<< std::endl;
 	  LiveUnionI++;
@@ -327,7 +329,7 @@ unsigned RABasic::selectOrSplit(LiveInterval &VirtReg,
 
   // Check for an available register in this class.
   AllocationOrder Order(VirtReg.reg, *VRM, RegClassInfo, Matrix);
-  printPhysic();
+  printPhysic(VirtReg);
   while (unsigned PhysReg = Order.next()) {
     // Check for interference in PhysReg
     switch (Matrix->checkInterference(VirtReg, PhysReg)) {

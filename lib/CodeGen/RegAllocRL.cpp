@@ -99,13 +99,15 @@ int RegAllocRL::calculateReward(unsigned action, float weight) {
     curr_weight += weight;
 	if (curr_weight == 0.0 && terminalState) {
 		reward = 100;
-	} else {
-	  reward = -(500 * curr_weight);
+	} else if (curr_weight >= 0.2 && terminalState) {
+	  reward = -200;
+	} else if (curr_weight >= 0.1 && terminalState) {
+	  reward = -100;
 	}
-  _score += reward;
   } else {
     reward = -1;
   }
+  _score += reward;
   initialState = false;
   std::cout << "can size: " << past_cand.size() << std::endl;
   std::cout << "weight: " << weight << std::endl;

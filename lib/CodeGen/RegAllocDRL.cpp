@@ -325,6 +325,7 @@ bool RADrl::spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
 unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
                                 SmallVectorImpl<unsigned> &SplitVRegs) {
   // Populate a list of physical register spill candidates.
+  SmallVector<unsigned, 8> VRPhysRegSpillCands;
   SmallVector<unsigned, 8> PhysRegSpillCands;
 
   // Check for an available register in this class.
@@ -335,11 +336,11 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
     switch (Matrix->checkInterference(VirtReg, PhysReg)) {
     case LiveRegMatrix::IK_Free:
       // PhysReg is available, allocate it.
-      return PhysReg;
+      PhysRegSpillCands.push_back(PhysReg);
 
     case LiveRegMatrix::IK_VirtReg:
       // Only virtual registers in the way, we may be able to spill them.
-      PhysRegSpillCands.push_back(PhysReg);
+      VRPhysRegSpillCands.push_back(PhysReg);
       continue;
 
     default:
@@ -349,8 +350,8 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
   }
 
   // Try to spill another interfering reg with less spill weight.
-  for (SmallVectorImpl<unsigned>::iterator PhysRegI = PhysRegSpillCands.begin(),
-       PhysRegE = PhysRegSpillCands.end(); PhysRegI != PhysRegE; ++PhysRegI) {
+  while (unsigned Reeg = pickAction()) {
+	 switch (checkGroup(Reg)) {
     if (!spillInterferences(VirtReg, *PhysRegI, SplitVRegs))
       continue;
 

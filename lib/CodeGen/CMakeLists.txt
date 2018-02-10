@@ -109,6 +109,7 @@ add_llvm_library(LLVMCodeGen
   RegAllocBasic.cpp
   RegAllocRL.cpp
   RegAllocRLImpl.cpp
+  RegAllocDRL.cpp
   RegAllocFast.cpp
   RegAllocGreedy.cpp
   RegAllocPBQP.cpp
