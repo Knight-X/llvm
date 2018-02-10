@@ -307,6 +307,7 @@ void initializeProfileSummaryInfoWrapperPassPass(PassRegistry&);
 void initializePromoteLegacyPassPass(PassRegistry&);
 void initializePruneEHPass(PassRegistry&);
 void initializeRABasicPass(PassRegistry&);
+void initializeRADrlPass(PassRegistry&);
 void initializeRARLPass(PassRegistry&);
 void initializeRegAllocFastPass(PassRegistry&);
 void initializeRAGreedyPass(PassRegistry&);

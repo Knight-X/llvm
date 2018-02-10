@@ -158,6 +158,9 @@ class raw_ostream;
 
     /// Print this index to the given raw_ostream.
     void print(raw_ostream &os) const;
+    unsigned getint() const {
+      return listEntry()->getIndex() | getSlot();
+    }
 
     /// Dump this index to stderr.
     void dump() const;
