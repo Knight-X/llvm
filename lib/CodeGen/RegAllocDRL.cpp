@@ -266,6 +266,41 @@ void RADrl::releaseMemory() {
   SpillerInstance.reset();
 }
 
+
+bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &weight) {
+  SmallVector<LiveInterval*, 8> Intfs;
+
+  // Collect interferences assigned to any alias of the physical register.
+  for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
+    LiveIntervalUnion::Query &Q = Matrix->query(VirtReg, *Units);
+    Q.collectInterferingVRegs();
+    for (unsigned i = Q.interferingVRegs().size(); i; --i) {
+      LiveInterval *Intf = Q.interferingVRegs()[i - 1];
+      if (!Intf->isSpillable()) {
+	return false;
+      }
+      weight += Intf->weight;
+    }
+  }
+
+}
+
+void RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand) {
+  struct cmp {
+        bool operator()(const std::pair<unsigned, float> &a, const std::pair<unsigned, float> &b) {
+            return a.second < b.second;
+        };
+  };
+  priority_queue<std::pair<unsigned, float>, std::vector<std::pair<unsigned, float>>, cmp> p(reward.begin(), reward.end());
+  for (unsigned i = 0; i < vrcand.size(); i++) {
+    std::pair<unsigned, float> top = p.top();
+    reward[top.first] =  vrcand.size() - i;
+    p.pop();
+  }
+  for (unsigned i = 0; i < cand.size() + vrcand.size(); i++) {
+    reward[cands[i]] = cand.size() - i;
+  }
+}
 // Spill or split all live virtual registers currently unified under PhysReg
 // that interfere with VirtReg. The newly spilled or split live intervals are
 // returned by appending them to SplitVRegs.
@@ -327,6 +362,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
   // Populate a list of physical register spill candidates.
   SmallVector<unsigned, 8> VRPhysRegSpillCands;
   SmallVector<unsigned, 8> PhysRegSpillCands;
+  std::map<unsigned, int> reward;
 
   // Check for an available register in this class.
   AllocationOrder Order(VirtReg.reg, *VRM, RegClassInfo, Matrix);
@@ -337,10 +373,15 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
     case LiveRegMatrix::IK_Free:
       // PhysReg is available, allocate it.
       PhysRegSpillCands.push_back(PhysReg);
+      continue;
 
     case LiveRegMatrix::IK_VirtReg:
+      float weight = 0;
       // Only virtual registers in the way, we may be able to spill them.
-      VRPhysRegSpillCands.push_back(PhysReg);
+      if (calculateSpillWeight(VirtReg, PhysReg, weight)) {
+        VRPhysRegSpillCands.push_back(PhysReg);
+        reward[PhysReg] = weight;
+      }
       continue;
 
     default:
@@ -348,30 +389,35 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       continue;
     }
   }
-
+  calculateReward(reward, PhysRegSpillCands, VRPhysRegSpillCands);
   // Try to spill another interfering reg with less spill weight.
   while (unsigned Reeg = pickAction()) {
-	 switch (checkGroup(Reg)) {
-    if (!spillInterferences(VirtReg, *PhysRegI, SplitVRegs))
-      continue;
+    switch (checkGroup(Reg)) {
+    case Free:
+      return Reg;
+    case VR:
+      if (!spillInterferences(VirtReg, *PhysRegI, SplitVRegs))
+        continue;
 
-    assert(!Matrix->checkInterference(VirtReg, *PhysRegI) &&
+      assert(!Matrix->checkInterference(VirtReg, *PhysRegI) &&
            "Interference after spill.");
-    // Tell the caller to allocate to this newly freed physical register.
-    return *PhysRegI;
+      // Tell the caller to allocate to this newly freed physical register.
+      return *PhysRegI;
+    case Self:
+      // No other spill candidates were found, so spill the current VirtReg.
+      DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
+      if (!VirtReg.isSpillable())
+        return ~0u;
+      LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+      spiller().spill(LRE);
+
+      // The live virtual register requesting allocation was spilled, so tell
+      // the caller not to allocate anything during this round.
+      return 0;
+      
+    }
   }
 
-  // No other spill candidates were found, so spill the current VirtReg.
-  DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
-  if (!VirtReg.isSpillable())
-    return ~0u;
-  LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-  weight += VirtReg.weight;
-  spiller().spill(LRE);
-
-  // The live virtual register requesting allocation was spilled, so tell
-  // the caller not to allocate anything during this round.
-  return 0;
 }
 
 bool RADrl::runOnMachineFunction(MachineFunction &mf) {
