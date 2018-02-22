@@ -14,6 +14,8 @@
 
 #include "RegAllocBase.h"
 #include "Spiller.h"
+#include <iostream>
+#include <fstream>
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LiveInterval.h"
@@ -37,6 +39,15 @@ using namespace llvm;
 
 STATISTIC(NumNewQueued    , "Number of new live ranges queued");
 
+bool printToFile(const std::string &filename) {
+  std::ofstream ofile;
+  ofile.open(filename.c_str());
+  if (!ofile) {
+	  return false;
+  }
+  ofile.close();
+  return true;
+}
 // Temporary verification option until we can put verification inside
 // MachineVerifier.
 static cl::opt<bool, true>
@@ -135,8 +146,11 @@ void RegAllocBase::allocatePhysRegs() {
       continue;
     }
 
-    if (AvailablePhysReg)
+    if (AvailablePhysReg) {
       Matrix->assign(*VirtReg, AvailablePhysReg);
+      std::string f = "actiondone.txt";
+      printToFile(f.c_str());
+    }
 
     for (unsigned Reg : SplitVRegs) {
       assert(LIS->hasInterval(Reg));

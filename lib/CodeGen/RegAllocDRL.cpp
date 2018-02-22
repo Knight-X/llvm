@@ -14,6 +14,8 @@
 
 #include "AllocationOrder.h"
 #include "LiveDebugVariables.h"
+#include <unistd.h>
+#include <queue>
 #include "RegAllocBase.h"
 #include "Spiller.h"
 #include <iostream>
@@ -55,7 +57,14 @@ namespace {
     }
   };
 }
-bool mapToFilep(const std::string &filename, commap &store)     //Write Map
+ 
+enum VirgState {
+	Free = 0,
+	Virt,
+	Self
+};
+
+bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>& reward)     //Write Map
 {
     std::ofstream ofile;
     ofile.open(filename.c_str());
@@ -64,6 +73,10 @@ bool mapToFilep(const std::string &filename, commap &store)     //Write Map
         return false;           //file does not exist and cannot be created.
     }
     if (store.size() == 0) {
+    ofile << "reward\n";
+    for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
+	    ofile << iter->first << "&" << iter->second;
+    }
 	 return false;
     }
     for (commap::iterator it=store.begin(); it!=store.end(); ++it) {
@@ -73,6 +86,10 @@ bool mapToFilep(const std::string &filename, commap &store)     //Write Map
 	}
 	ofile<< "\n";
     }	
+    ofile << "reward\n";
+    for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
+	    ofile << iter->first << "&" << iter->second;
+    }
 
     return true;
 }
@@ -110,7 +127,7 @@ public:
   /// RABasic analysis usage.
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  void printPhysic(LiveRange& vreg);
+  void printPhysic(LiveRange& vreg, commap& state);
 
   void releaseMemory() override;
 
@@ -148,6 +165,10 @@ bool doFinalization(Module &M) override {
   // was successful, and append any new spilled/split intervals to splitLVRs.
   bool spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
                           SmallVectorImpl<unsigned> &SplitVRegs);
+  bool calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state);
+  bool calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &weight);
+  unsigned pickAction();
+  int checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand);
 
   static char ID;
 };
@@ -188,11 +209,10 @@ bool RADrl::LRE_CanEraseVirtReg(unsigned VirtReg) {
   return false;
 }
 static int iteration = 0;
-void RADrl::printPhysic(LiveRange& vreg) {
+void RADrl::printPhysic(LiveRange& vreg, commap& state) {
     std::cout << "new state: " << std::to_string(iteration) << std::endl;
     LiveIntervalUnion *Q = Matrix->getLiveUnions();
     const TargetRegisterInfo *TRI = &VRM->getTargetRegInfo();
-    std::map<unsigned, std::set<std::pair<int, int>>> store;
     for (unsigned i = 0; i < TRI->getNumRegClasses(); i++) {
       const TargetRegisterClass* g = TRI->getRegClass(i);
       ArrayRef<MCPhysReg> group = RegClassInfo.getOrder(g);
@@ -205,7 +225,7 @@ void RADrl::printPhysic(LiveRange& vreg) {
 	  while (LiveUnionI.valid()) {
 		  LiveRange::const_iterator LRI = vreg.begin();
 	    if (LiveUnionI.start() > LRI->start && LiveUnionI.start().getint() < LRI->start.getint() + 246)
-	    store[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint()));
+	    state[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint()));
           //std::cout << "start: " << LiveUnionI.start().getint() << "end: " << LiveUnionI.stop().getint()<< std::endl;
 	  LiveUnionI++;
 	  }
@@ -220,9 +240,6 @@ void RADrl::printPhysic(LiveRange& vreg) {
 	std::cout << std::endl;
     }	
     std::cout << std::endl;*/
-    std::string file = "go" + std::to_string(iteration) + ".txt";
-    mapToFilep(file, store);
-    iteration++;
 
 }
 void RADrl::LRE_WillShrinkVirtReg(unsigned VirtReg) {
@@ -267,39 +284,101 @@ void RADrl::releaseMemory() {
 }
 
 
-bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &weight) {
+bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &w) {
   SmallVector<LiveInterval*, 8> Intfs;
 
   // Collect interferences assigned to any alias of the physical register.
-  for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
-    LiveIntervalUnion::Query &Q = Matrix->query(VirtReg, *Units);
+  for (MCRegUnitIterator Units(Phys, TRI); Units.isValid(); ++Units) {
+    LiveIntervalUnion::Query &Q = Matrix->query(Virt, *Units);
     Q.collectInterferingVRegs();
     for (unsigned i = Q.interferingVRegs().size(); i; --i) {
       LiveInterval *Intf = Q.interferingVRegs()[i - 1];
       if (!Intf->isSpillable()) {
 	return false;
       }
-      weight += Intf->weight;
+      w += Intf->weight;
     }
   }
 
+  return true;
 }
 
-void RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand) {
+unsigned RADrl::pickAction() {
+	std::string gg = "pickactionstart";
+  std::ofstream sfile;
+  sfile.open(gg.c_str());
+  sfile.close();
+	
+	
+  std::ofstream ofile;
+  std::string f = "actionstart.txt";
+  ofile.open(f.c_str());
+
+  std::string filename = "actionbarrier.txt";
+  std::ifstream ifile;
+  ifile.open(filename.c_str());
+  while(!ifile)
+  {
+    sleep(2);
+    std::cout << "find actionbarrier..." << std::endl;
+    ifile.open(filename.c_str());
+  }
+  ifile.close();
+  std::string actionname = "action.txt";
+  std::ifstream actionfile;
+  actionfile.open(actionname.c_str());
+  std::string action;
+  actionfile.seekg(0, actionfile.beg);
+  actionfile >> action;
+  remove("actionbarrier.txt");
+  gg = "pickactionend";
+  sfile.open(gg.c_str());
+  return std::stoi(action);
+}
+int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand) {
+ for (unsigned i = 0; i < cands.size(); i++) {
+	 if (cands[i] == reg) {
+	   return Free;
+	 }
+ }
+
+ for (unsigned i = 0; i < vrcand.size(); i++) {
+   if (vrcand[i] == reg) {
+	   return Virt;
+   }
+
+ }
+   return 9;
+}
+bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state) {
+  std::cout << " reward start... " << std::endl;
   struct cmp {
         bool operator()(const std::pair<unsigned, float> &a, const std::pair<unsigned, float> &b) {
             return a.second < b.second;
         };
   };
-  priority_queue<std::pair<unsigned, float>, std::vector<std::pair<unsigned, float>>, cmp> p(reward.begin(), reward.end());
+  std::priority_queue<std::pair<unsigned, float>, std::vector<std::pair<unsigned, float>>, cmp> p(reward.begin(), reward.end());
   for (unsigned i = 0; i < vrcand.size(); i++) {
     std::pair<unsigned, float> top = p.top();
     reward[top.first] =  vrcand.size() - i;
     p.pop();
   }
-  for (unsigned i = 0; i < cand.size() + vrcand.size(); i++) {
-    reward[cands[i]] = cand.size() - i;
+  for (unsigned i = 0; i < cands.size() + vrcand.size(); i++) {
+    reward[cands[i]] = cands.size() - i;
   }
+  //std::string file = "go" + std::to_string(iteration) + ".txt";
+  std::string file = "state.txt";
+  mapToFilep(file, state, reward);
+  std::string filename = "statedone.txt";
+  std::ofstream ofile;
+  ofile.open(filename.c_str());
+  if(!ofile)
+  {
+      return false; 
+  }
+  iteration++;
+  std::cout << " reward end... " << std::endl;
+  return true;
 }
 // Spill or split all live virtual registers currently unified under PhysReg
 // that interfere with VirtReg. The newly spilled or split live intervals are
@@ -362,12 +441,14 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
   // Populate a list of physical register spill candidates.
   SmallVector<unsigned, 8> VRPhysRegSpillCands;
   SmallVector<unsigned, 8> PhysRegSpillCands;
-  std::map<unsigned, int> reward;
+  std::map<int, float> reward;
 
   // Check for an available register in this class.
   AllocationOrder Order(VirtReg.reg, *VRM, RegClassInfo, Matrix);
-  printPhysic(VirtReg);
+    std::map<unsigned, std::set<std::pair<int, int>>> state;
+  printPhysic(VirtReg, state);
   while (unsigned PhysReg = Order.next()) {
+    float new_weight = 0.0;
     // Check for interference in PhysReg
     switch (Matrix->checkInterference(VirtReg, PhysReg)) {
     case LiveRegMatrix::IK_Free:
@@ -376,11 +457,10 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       continue;
 
     case LiveRegMatrix::IK_VirtReg:
-      float weight = 0;
       // Only virtual registers in the way, we may be able to spill them.
-      if (calculateSpillWeight(VirtReg, PhysReg, weight)) {
+      if (calculateSpillWeight(VirtReg, PhysReg, new_weight)) {
         VRPhysRegSpillCands.push_back(PhysReg);
-        reward[PhysReg] = weight;
+        reward[PhysReg] = new_weight;
       }
       continue;
 
@@ -389,20 +469,20 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       continue;
     }
   }
-  calculateReward(reward, PhysRegSpillCands, VRPhysRegSpillCands);
+  calculateReward(reward, PhysRegSpillCands, VRPhysRegSpillCands, state);
   // Try to spill another interfering reg with less spill weight.
-  while (unsigned Reeg = pickAction()) {
-    switch (checkGroup(Reg)) {
+  while (unsigned Reg = pickAction()) {
+    switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands)) {
     case Free:
       return Reg;
-    case VR:
-      if (!spillInterferences(VirtReg, *PhysRegI, SplitVRegs))
+    case Virt:
+      if (!spillInterferences(VirtReg, Reg, SplitVRegs))
         continue;
 
-      assert(!Matrix->checkInterference(VirtReg, *PhysRegI) &&
+      assert(!Matrix->checkInterference(VirtReg, Reg) &&
            "Interference after spill.");
       // Tell the caller to allocate to this newly freed physical register.
-      return *PhysRegI;
+      return Reg;
     case Self:
       // No other spill candidates were found, so spill the current VirtReg.
       DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
@@ -418,6 +498,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
     }
   }
 
+  return ~0u;
 }
 
 bool RADrl::runOnMachineFunction(MachineFunction &mf) {
