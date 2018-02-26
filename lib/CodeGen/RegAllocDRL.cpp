@@ -44,7 +44,7 @@
 using namespace llvm;
 typedef std::map<unsigned, std::set<std::pair<int, int>>> commap;
 
-#define DEBUG_TYPE "regalloc"
+#define DEBUG_TYPE "regallocdl"
 
 static RegisterRegAlloc drlRegAlloc("drl", "drl register allocator",
                                       createDRLRegisterAllocator);
@@ -61,7 +61,8 @@ namespace {
 enum VirgState {
 	Free = 0,
 	Virt,
-	Self
+	Self,
+	Failed
 };
 
 bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>& reward)     //Write Map
@@ -75,7 +76,7 @@ bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>
     if (store.size() == 0) {
     ofile << "reward\n";
     for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
-	    ofile << iter->first << "&" << iter->second;
+	    ofile << iter->first << "&" << iter->second << "&";
     }
 	 return false;
     }
@@ -88,7 +89,7 @@ bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>
     }	
     ofile << "reward\n";
     for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
-	    ofile << iter->first << "&" << iter->second;
+	    ofile << iter->first << "&" << iter->second << "&";
     }
 
     return true;
@@ -148,7 +149,11 @@ public:
   unsigned selectOrSplit(LiveInterval &VirtReg,
                          SmallVectorImpl<unsigned> &SplitVRegs) override;
 bool doFinalization(Module &M) override {
-  std::cout << "finalize: " << weight << std::endl;
+  std::string gg = "terminal.txt";
+  std::ofstream sfile;
+  sfile.open(gg.c_str());
+  sfile.close();
+  DEBUG(llvm::dbgs() << "terminal" << "\n");
   return true;
 }
 
@@ -210,7 +215,7 @@ bool RADrl::LRE_CanEraseVirtReg(unsigned VirtReg) {
 }
 static int iteration = 0;
 void RADrl::printPhysic(LiveRange& vreg, commap& state) {
-    std::cout << "new state: " << std::to_string(iteration) << std::endl;
+    DEBUG(llvm::dbgs() << "new state: " << std::to_string(iteration) << "\n");
     LiveIntervalUnion *Q = Matrix->getLiveUnions();
     const TargetRegisterInfo *TRI = &VRM->getTargetRegInfo();
     for (unsigned i = 0; i < TRI->getNumRegClasses(); i++) {
@@ -232,6 +237,8 @@ void RADrl::printPhysic(LiveRange& vreg, commap& state) {
         }
       }
     }
+    DEBUG(llvm::dbgs() << "new state: " << std::to_string(iteration) << "finish\n");
+    iteration++;
     /*for (std::map<unsigned, std::set<std::pair<int, int>>>::iterator it=store.begin(); it!=store.end(); ++it) {
         std::cout << "phys reg: " << it->first << std::endl;
 	for(auto iter : it->second) {
@@ -304,6 +311,7 @@ bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &w) {
 }
 
 unsigned RADrl::pickAction() {
+  DEBUG(llvm::dbgs() << "c++: pickaction \n");
 	std::string gg = "pickactionstart";
   std::ofstream sfile;
   sfile.open(gg.c_str());
@@ -320,38 +328,50 @@ unsigned RADrl::pickAction() {
   while(!ifile)
   {
     sleep(2);
-    std::cout << "find actionbarrier..." << std::endl;
+    DEBUG(llvm::dbgs() << "c++: find actionbarrier \n");
     ifile.open(filename.c_str());
   }
   ifile.close();
   std::string actionname = "action.txt";
   std::ifstream actionfile;
   actionfile.open(actionname.c_str());
-  std::string action;
+  unsigned action = 0;
   actionfile.seekg(0, actionfile.beg);
   actionfile >> action;
   remove("actionbarrier.txt");
   gg = "pickactionend";
   sfile.open(gg.c_str());
-  return std::stoi(action);
+    DEBUG(llvm::dbgs() << "c++: pick action finish \n");
+  return action;
 }
 int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand) {
- for (unsigned i = 0; i < cands.size(); i++) {
-	 if (cands[i] == reg) {
+ if (reg == 0) {
+    DEBUG(llvm::dbgs() << "spill self:" << reg << "\n");
+    return Self;
+ }
+ for (unsigned candsi = 0; candsi < cands.size(); candsi++) {
+	 if (cands[candsi] == reg) {
+           DEBUG(llvm::dbgs() << "choose phys" << reg << "\n");
+	   cands.erase(cands.begin() + candsi);
 	   return Free;
 	 }
  }
 
- for (unsigned i = 0; i < vrcand.size(); i++) {
-   if (vrcand[i] == reg) {
+ for (unsigned vrcandi = 0; vrcandi < vrcand.size(); vrcandi++) {
+   if (vrcand[vrcandi] == reg) {
+           DEBUG(llvm::dbgs() << "choose virts" << reg << "\n");
+	   vrcand.erase(vrcand.begin() + vrcandi);
 	   return Virt;
    }
 
  }
-   return 9;
+   DEBUG(llvm::dbgs() << "choose nothing" << reg << "\n");
+   DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::dbgs() << cands[i] << " "; } dbgs() << "\n";);
+   DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
+   return 3;
 }
 bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state) {
-  std::cout << " reward start... " << std::endl;
+  DEBUG(llvm::dbgs() << "c++: reward start \n");
   struct cmp {
         bool operator()(const std::pair<unsigned, float> &a, const std::pair<unsigned, float> &b) {
             return a.second < b.second;
@@ -363,9 +383,10 @@ bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsign
     reward[top.first] =  vrcand.size() - i;
     p.pop();
   }
-  for (unsigned i = 0; i < cands.size() + vrcand.size(); i++) {
+  for (unsigned i = 0; i < cands.size(); i++) {
     reward[cands[i]] = cands.size() - i;
   }
+
   //std::string file = "go" + std::to_string(iteration) + ".txt";
   std::string file = "state.txt";
   mapToFilep(file, state, reward);
@@ -376,8 +397,7 @@ bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsign
   {
       return false; 
   }
-  iteration++;
-  std::cout << " reward end... " << std::endl;
+  DEBUG(llvm::dbgs() << "c++: reward end \n");
   return true;
 }
 // Spill or split all live virtual registers currently unified under PhysReg
@@ -469,13 +489,29 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       continue;
     }
   }
+  if (VirtReg.isSpillable()) {
+
+    DEBUG(llvm::dbgs() << "virt self is spillable \n");
+    VRPhysRegSpillCands.push_back(0);
+    reward[0] = VirtReg.weight;
+  }
   calculateReward(reward, PhysRegSpillCands, VRPhysRegSpillCands, state);
+    DEBUG(llvm::dbgs() << "state done \n");
   // Try to spill another interfering reg with less spill weight.
   while (unsigned Reg = pickAction()) {
+    DEBUG(llvm::dbgs() << "pick finish " << Reg << "\n");
     switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands)) {
     case Free:
+      DEBUG(llvm::dbgs() << "check phys finish " << Reg << "\n");
+      if (Reg == 0) {
+      report_fatal_error("phys register wrong");
+      }
       return Reg;
     case Virt:
+      DEBUG(llvm::dbgs() << "check virtual finish " << Reg << "\n");
+      if (Reg == 0) {
+      report_fatal_error("virt register wrong");
+      }
       if (!spillInterferences(VirtReg, Reg, SplitVRegs))
         continue;
 
@@ -483,7 +519,8 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
            "Interference after spill.");
       // Tell the caller to allocate to this newly freed physical register.
       return Reg;
-    case Self:
+    case Self: {
+      DEBUG(llvm::dbgs() << "check self finish " << Reg << "\n");
       // No other spill candidates were found, so spill the current VirtReg.
       DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
       if (!VirtReg.isSpillable())
@@ -494,11 +531,27 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       // The live virtual register requesting allocation was spilled, so tell
       // the caller not to allocate anything during this round.
       return 0;
-      
+	       }
+
+    case Failed: {
+      while (true) {
+      DEBUG(llvm::dbgs() << "candidate is wrong, but target is" << Reg << "\n");
+      DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < PhysRegSpillCands.size(); i++) { llvm::dbgs() << PhysRegSpillCands[i] << " "; } dbgs() << "\n";);
+      DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < VRPhysRegSpillCands.size(); i++) { llvm::dbgs() << VRPhysRegSpillCands[i] << " "; } dbgs() << "\n";);
+      }
+      continue;
+		 }
+
     }
   }
-
-  return ~0u;
+      
+      DEBUG(dbgs() << "spilling self: " << VirtReg << '\n');
+      if (!VirtReg.isSpillable())
+        return ~0u;
+      LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
+      spiller().spill(LRE);
+      return 0;
+      // No other spill candidates were found, so spill the current VirtReg.
 }
 
 bool RADrl::runOnMachineFunction(MachineFunction &mf) {
@@ -522,7 +575,7 @@ bool RADrl::runOnMachineFunction(MachineFunction &mf) {
   postOptimization();
 
   // Diagnostic output before rewriting
-  DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
+  //DEBUG(dbgs() << "Post alloc VirtRegMap:\n" << *VRM << "\n");
 
   releaseMemory();
   std::cout << "function end" << std::to_string(iteration) << std::endl;

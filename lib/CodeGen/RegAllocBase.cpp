@@ -35,7 +35,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "regalloc"
+#define DEBUG_TYPE "regallocdl"
 
 STATISTIC(NumNewQueued    , "Number of new live ranges queued");
 
@@ -148,8 +148,6 @@ void RegAllocBase::allocatePhysRegs() {
 
     if (AvailablePhysReg) {
       Matrix->assign(*VirtReg, AvailablePhysReg);
-      std::string f = "actiondone.txt";
-      printToFile(f.c_str());
     }
 
     for (unsigned Reg : SplitVRegs) {
@@ -170,6 +168,9 @@ void RegAllocBase::allocatePhysRegs() {
       enqueue(SplitVirtReg);
       ++NumNewQueued;
     }
+      DEBUG(llvm::dbgs() << "actiondone\n");
+      std::string f = "actiondone.txt";
+      printToFile(f.c_str());
   }
 }
 
