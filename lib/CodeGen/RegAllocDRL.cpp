@@ -157,11 +157,21 @@ public:
   unsigned selectOrSplit(LiveInterval &VirtReg,
                          SmallVectorImpl<unsigned> &SplitVRegs) override;
 bool doFinalization(Module &M) override {
-  std::string gg = "terminal.txt";
-  std::ofstream sfile;
-  sfile.open(gg.c_str());
-  sfile.close();
   DEBUG(llvm::dbgs() << "terminal" << "\n");
+  int sockfd = 0;
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);  
+  struct sockaddr_in info;
+  bzero(&info, sizeof(info));
+  info.sin_family = PF_INET;
+
+  info.sin_addr.s_addr = inet_addr("127.0.0.1");
+  info.sin_port = htons(1992);
+
+  connect(sockfd, (struct sockaddr *)&info, sizeof(info));	
+
+  const char g = 'e';
+  int n = send(sockfd, &g, 1, 0);
+  close(sockfd);
   return true;
 }
 
@@ -331,9 +341,10 @@ unsigned RADrl::pickAction() {
   connect(sockfd, (struct sockaddr *)&info, sizeof(info));	
 
   const char g = 'g';
-  char receive[1] = {};
+  char receive[3] = {};
   int n = send(sockfd, &g, 1, 0);
   recv(sockfd, receive, sizeof(receive), 0);
+  close(sockfd);
   int j;
   sscanf(receive, "%d", &j);
   unsigned action = (unsigned)j;
