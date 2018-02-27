@@ -16,6 +16,14 @@
 #include "LiveDebugVariables.h"
 #include <unistd.h>
 #include <queue>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdio.h>
 #include "RegAllocBase.h"
 #include "Spiller.h"
 #include <iostream>
@@ -311,37 +319,24 @@ bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &w) {
 }
 
 unsigned RADrl::pickAction() {
-  DEBUG(llvm::dbgs() << "c++: pickaction \n");
-	std::string gg = "pickactionstart";
-  std::ofstream sfile;
-  sfile.open(gg.c_str());
-  sfile.close();
-	
-	
-  std::ofstream ofile;
-  std::string f = "actionstart.txt";
-  ofile.open(f.c_str());
+  int sockfd = 0;
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);  
+  struct sockaddr_in info;
+  bzero(&info, sizeof(info));
+  info.sin_family = PF_INET;
 
-  std::string filename = "actionbarrier.txt";
-  std::ifstream ifile;
-  ifile.open(filename.c_str());
-  while(!ifile)
-  {
-    sleep(2);
-    DEBUG(llvm::dbgs() << "c++: find actionbarrier \n");
-    ifile.open(filename.c_str());
-  }
-  ifile.close();
-  std::string actionname = "action.txt";
-  std::ifstream actionfile;
-  actionfile.open(actionname.c_str());
-  unsigned action = 0;
-  actionfile.seekg(0, actionfile.beg);
-  actionfile >> action;
-  remove("actionbarrier.txt");
-  gg = "pickactionend";
-  sfile.open(gg.c_str());
-    DEBUG(llvm::dbgs() << "c++: pick action finish \n");
+  info.sin_addr.s_addr = inet_addr("127.0.0.1");
+  info.sin_port = htons(1992);
+
+  connect(sockfd, (struct sockaddr *)&info, sizeof(info));	
+
+  const char g = 'g';
+  char receive[1] = {};
+  int n = send(sockfd, &g, 1, 0);
+  recv(sockfd, receive, sizeof(receive), 0);
+  int j;
+  sscanf(receive, "%d", &j);
+  unsigned action = (unsigned)j;
   return action;
 }
 int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand) {
