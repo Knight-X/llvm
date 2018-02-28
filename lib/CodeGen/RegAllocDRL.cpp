@@ -81,7 +81,7 @@ bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>
     {
         return false;           //file does not exist and cannot be created.
     }
-    if (store.size() == 0) {
+    if (store.size() == 0 && reward.size() > 0) {
     ofile << "reward\n";
     for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
 	    ofile << iter->first << "&" << iter->second << "&";
@@ -95,9 +95,11 @@ bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>
 	}
 	ofile<< "\n";
     }	
+    if (reward.size() > 0) {
     ofile << "reward\n";
     for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
 	    ofile << iter->first << "&" << iter->second << "&";
+    }
     }
 
     return true;
@@ -190,8 +192,8 @@ bool doFinalization(Module &M) override {
                           SmallVectorImpl<unsigned> &SplitVRegs);
   bool calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state);
   bool calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &weight);
-  unsigned pickAction();
-  int checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand);
+  unsigned pickAction(std::map<int, float>& reward, commap& state);
+  int checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward);
 
   static char ID;
 };
@@ -328,7 +330,16 @@ bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &w) {
   return true;
 }
 
-unsigned RADrl::pickAction() {
+unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state) {
+  std::string file = "state.txt";
+  mapToFilep(file, state, reward);
+  std::string filename = "statedone.txt";
+  std::ofstream ofile;
+  ofile.open(filename.c_str());
+  if(!ofile)
+  {
+      return false; 
+  }
   int sockfd = 0;
   sockfd = socket(AF_INET, SOCK_STREAM, 0);  
   struct sockaddr_in info;
@@ -350,13 +361,17 @@ unsigned RADrl::pickAction() {
   unsigned action = (unsigned)j;
   return action;
 }
-int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand) {
+int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward) {
  if (reg == 0) {
     DEBUG(llvm::dbgs() << "spill self:" << reg << "\n");
     return Self;
  }
  for (unsigned candsi = 0; candsi < cands.size(); candsi++) {
 	 if (cands[candsi] == reg) {
+		 std::map<int, float>::iterator it = reward.find(reg);
+		 if (it != reward.end()) {
+		   reward.erase(it);
+		 }
            DEBUG(llvm::dbgs() << "choose phys" << reg << "\n");
 	   cands.erase(cands.begin() + candsi);
 	   return Free;
@@ -365,6 +380,10 @@ int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVecto
 
  for (unsigned vrcandi = 0; vrcandi < vrcand.size(); vrcandi++) {
    if (vrcand[vrcandi] == reg) {
+	  std::map<int, float>::iterator it = reward.find(reg);
+	  if (it != reward.end()) {
+	    reward.erase(it);
+	   }
            DEBUG(llvm::dbgs() << "choose virts" << reg << "\n");
 	   vrcand.erase(vrcand.begin() + vrcandi);
 	   return Virt;
@@ -394,15 +413,6 @@ bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsign
   }
 
   //std::string file = "go" + std::to_string(iteration) + ".txt";
-  std::string file = "state.txt";
-  mapToFilep(file, state, reward);
-  std::string filename = "statedone.txt";
-  std::ofstream ofile;
-  ofile.open(filename.c_str());
-  if(!ofile)
-  {
-      return false; 
-  }
   DEBUG(llvm::dbgs() << "c++: reward end \n");
   return true;
 }
@@ -504,9 +514,9 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
   calculateReward(reward, PhysRegSpillCands, VRPhysRegSpillCands, state);
     DEBUG(llvm::dbgs() << "state done \n");
   // Try to spill another interfering reg with less spill weight.
-  while (unsigned Reg = pickAction()) {
+  while (unsigned Reg = pickAction(reward, state)) {
     DEBUG(llvm::dbgs() << "pick finish " << Reg << "\n");
-    switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands)) {
+    switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands, reward)) {
     case Free:
       DEBUG(llvm::dbgs() << "check phys finish " << Reg << "\n");
       if (Reg == 0) {
@@ -554,6 +564,10 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       DEBUG(dbgs() << "spilling self: " << VirtReg << '\n');
       if (!VirtReg.isSpillable())
         return ~0u;
+      std::map<int, float>::iterator it = reward.find(0);
+      if (it != reward.end()) {
+	reward.erase(it);
+      }
       LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
       spiller().spill(LRE);
       return 0;
