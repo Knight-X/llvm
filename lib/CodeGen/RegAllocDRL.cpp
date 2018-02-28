@@ -233,7 +233,7 @@ bool RADrl::LRE_CanEraseVirtReg(unsigned VirtReg) {
   LI.clear();
   return false;
 }
-static int iteration = 0;
+static int iteration = 1;
 void RADrl::printPhysic(LiveRange& vreg, commap& state) {
     DEBUG(llvm::dbgs() << "new state: " << std::to_string(iteration) << "\n");
     LiveIntervalUnion *Q = Matrix->getLiveUnions();
@@ -351,9 +351,10 @@ unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state) {
 
   connect(sockfd, (struct sockaddr *)&info, sizeof(info));	
 
-  const char g = 'g';
+  char g[11] = {};
   char receive[3] = {};
-  int n = send(sockfd, &g, 1, 0);
+  sprintf(g, "%d", iteration);
+  int n = send(sockfd, g, 1, 0);
   recv(sockfd, receive, sizeof(receive), 0);
   close(sockfd);
   int j;
