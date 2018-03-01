@@ -363,10 +363,6 @@ unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state) {
   return action;
 }
 int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward) {
- if (reg == 0) {
-    DEBUG(llvm::dbgs() << "spill self:" << reg << "\n");
-    return Self;
- }
  for (unsigned candsi = 0; candsi < cands.size(); candsi++) {
 	 if (cands[candsi] == reg) {
 		 std::map<int, float>::iterator it = reward.find(reg);
@@ -520,15 +516,9 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
     switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands, reward)) {
     case Free:
       DEBUG(llvm::dbgs() << "check phys finish " << Reg << "\n");
-      if (Reg == 0) {
-      report_fatal_error("phys register wrong");
-      }
       return Reg;
     case Virt:
       DEBUG(llvm::dbgs() << "check virtual finish " << Reg << "\n");
-      if (Reg == 0) {
-      report_fatal_error("virt register wrong");
-      }
       if (!spillInterferences(VirtReg, Reg, SplitVRegs))
         continue;
 
@@ -536,19 +526,6 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
            "Interference after spill.");
       // Tell the caller to allocate to this newly freed physical register.
       return Reg;
-    case Self: {
-      DEBUG(llvm::dbgs() << "check self finish " << Reg << "\n");
-      // No other spill candidates were found, so spill the current VirtReg.
-      DEBUG(dbgs() << "spilling: " << VirtReg << '\n');
-      if (!VirtReg.isSpillable())
-        return ~0u;
-      LiveRangeEdit LRE(&VirtReg, SplitVRegs, *MF, *LIS, VRM, this, &DeadRemats);
-      spiller().spill(LRE);
-
-      // The live virtual register requesting allocation was spilled, so tell
-      // the caller not to allocate anything during this round.
-      return 0;
-	       }
 
     case Failed: {
       while (true) {
@@ -557,7 +534,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < VRPhysRegSpillCands.size(); i++) { llvm::dbgs() << VRPhysRegSpillCands[i] << " "; } dbgs() << "\n";);
       }
       continue;
-		 }
+    }
 
     }
   }
