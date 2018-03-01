@@ -81,27 +81,27 @@ bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>
     {
         return false;           //file does not exist and cannot be created.
     }
-    if (store.size() == 0 && reward.size() > 0) {
-    ofile << "reward\n";
-    for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
-	    ofile << iter->first << "&" << iter->second << "&";
+    ofile << 3333;
+    for (auto iter : store[3333]) {
+      ofile << "&" << iter.first << "&" << iter.second << "\n";
     }
-	 return false;
-    }
-    for (commap::iterator it=store.begin(); it!=store.end(); ++it) {
-        ofile << it->first;
-	for(auto iter : it->second) {
-	  ofile << "&" << iter.first << "&" << iter.second;
-	}
-	ofile<< "\n";
-    }	
     if (reward.size() > 0) {
-    ofile << "reward\n";
-    for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
-	    ofile << iter->first << "&" << iter->second << "&";
-    }
+      ofile << "reward\n";
+      for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
+        ofile << iter->first << "&" << iter->second << "&";
+      }
+      ofile << "\n";
     }
 
+    for (commap::iterator it=store.begin(); it!=store.end(); ++it) {
+	if (it->first != 3333) {
+          ofile << it->first;
+	  for(auto iter : it->second) {
+	    ofile << "&" << iter.first << "&" << iter.second;
+	  }
+	  ofile<< "\n";
+	}
+    }	
     return true;
 }
 
@@ -257,6 +257,8 @@ void RADrl::printPhysic(LiveRange& vreg, commap& state) {
         }
       }
     }
+    LiveRange::const_iterator LRI = vreg.begin();
+    state[3333].insert(std::pair<int, int>(LRI->start.getint(), LRI->end.getint()));
     DEBUG(llvm::dbgs() << "new state: " << std::to_string(iteration) << "finish\n");
     iteration++;
     /*for (std::map<unsigned, std::set<std::pair<int, int>>>::iterator it=store.begin(); it!=store.end(); ++it) {
@@ -363,6 +365,8 @@ unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state) {
   return action;
 }
 int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward) {
+DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::dbgs() << cands[i] << " "; } dbgs() << "\n";);
+DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
  for (unsigned candsi = 0; candsi < cands.size(); candsi++) {
 	 if (cands[candsi] == reg) {
 		 std::map<int, float>::iterator it = reward.find(reg);
@@ -370,7 +374,6 @@ int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVecto
 		   reward.erase(it);
 		 }
            DEBUG(llvm::dbgs() << "choose phys" << reg << "\n");
-	   cands.erase(cands.begin() + candsi);
 	   return Free;
 	 }
  }
@@ -388,8 +391,6 @@ int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVecto
 
  }
    DEBUG(llvm::dbgs() << "choose nothing" << reg << "\n");
-   DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::dbgs() << cands[i] << " "; } dbgs() << "\n";);
-   DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
    return 3;
 }
 bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state) {
@@ -400,6 +401,8 @@ bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsign
         };
   };
   std::priority_queue<std::pair<unsigned, float>, std::vector<std::pair<unsigned, float>>, cmp> p(reward.begin(), reward.end());
+DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::dbgs() << cands[i] << " "; } dbgs() << "\n";);
+DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
   for (unsigned i = 0; i < vrcand.size(); i++) {
     std::pair<unsigned, float> top = p.top();
     reward[top.first] =  vrcand.size() - i;
@@ -408,6 +411,7 @@ bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsign
   for (unsigned i = 0; i < cands.size(); i++) {
     reward[cands[i]] = cands.size() - i;
   }
+  DEBUG(dbgs() << "rewards\n"; for (std::map<int, float>::iterator it = reward.begin(); it != reward.end(); it++) { llvm::dbgs() << "first: " << it->first << " second: " << it->second << " "; } dbgs() << "\n";);
 
   //std::string file = "go" + std::to_string(iteration) + ".txt";
   DEBUG(llvm::dbgs() << "c++: reward end \n");
