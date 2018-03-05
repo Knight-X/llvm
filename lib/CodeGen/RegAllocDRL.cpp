@@ -73,7 +73,9 @@ enum VirgState {
 	Failed
 };
 
-bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>& reward)     //Write Map
+bool mapToFilep(const std::string &filename, commap &store,
+		std::map<int, float>& reward, 
+		std::map<int, float>& vreward)     //Write Map
 {
     std::ofstream ofile;
     ofile.open(filename.c_str());
@@ -85,13 +87,20 @@ bool mapToFilep(const std::string &filename, commap &store, std::map<int, float>
     for (auto iter : store[3333]) {
       ofile << "&" << iter.first << "&" << iter.second << "\n";
     }
+    ofile << "reward\n";
     if (reward.size() > 0) {
-      ofile << "reward\n";
       for (std::map<int, float>::iterator iter = reward.begin(); iter != reward.end(); iter++) {
         ofile << iter->first << "&" << iter->second << "&";
       }
-      ofile << "\n";
     }
+    ofile << "\n";
+    ofile << "vreward\n";
+    if (vreward.size() > 0) {
+      for (std::map<int, float>::iterator iter = vreward.begin(); iter != vreward.end(); iter++) {
+        ofile << iter->first << "&" << iter->second << "&";
+      }
+    }
+    ofile << "\n";
 
     for (commap::iterator it=store.begin(); it!=store.end(); ++it) {
 	if (it->first != 3333) {
@@ -190,9 +199,9 @@ bool doFinalization(Module &M) override {
   // was successful, and append any new spilled/split intervals to splitLVRs.
   bool spillInterferences(LiveInterval &VirtReg, unsigned PhysReg,
                           SmallVectorImpl<unsigned> &SplitVRegs);
-  bool calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state);
+  bool calculateReward(std::map<int, float>& reward, std::map<int, float>& vreward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state);
   bool calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &weight);
-  unsigned pickAction(std::map<int, float>& reward, commap& state);
+  unsigned pickAction(std::map<int, float>& reward, commap& state, std::map<int, float>&vreward );
   int checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward);
 
   static char ID;
@@ -248,11 +257,9 @@ void RADrl::printPhysic(LiveRange& vreg, commap& state) {
 	  LiveUnionI.setMap(Q[*Units].getMap());
 	  LiveUnionI.goToBegin();
 	  while (LiveUnionI.valid()) {
-		  LiveRange::const_iterator LRI = vreg.begin();
-	    if (LiveUnionI.start() > LRI->start && LiveUnionI.start().getint() < LRI->start.getint() + 246)
+//should not have interference with start + 246, it should be total state
 	    state[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint()));
-          //std::cout << "start: " << LiveUnionI.start().getint() << "end: " << LiveUnionI.stop().getint()<< std::endl;
-	  LiveUnionI++;
+	    LiveUnionI++;
 	  }
         }
       }
@@ -332,9 +339,10 @@ bool RADrl::calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &w) {
   return true;
 }
 
-unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state) {
+unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state, 
+		std::map<int, float>& vreward) {
   std::string file = "state.txt";
-  mapToFilep(file, state, reward);
+  mapToFilep(file, state, reward, vreward);
   std::string filename = "statedone.txt";
   std::ofstream ofile;
   ofile.open(filename.c_str());
@@ -393,7 +401,7 @@ DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::
    DEBUG(llvm::dbgs() << "choose nothing" << reg << "\n");
    return 3;
 }
-bool RADrl::calculateReward(std::map<int, float>& reward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state) {
+bool RADrl::calculateReward(std::map<int, float>& reward, std::map<int, float>& vreward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state) {
   DEBUG(llvm::dbgs() << "c++: reward start \n");
   struct cmp {
         bool operator()(const std::pair<unsigned, float> &a, const std::pair<unsigned, float> &b) {
@@ -405,7 +413,7 @@ DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::db
 DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
   for (unsigned i = 0; i < vrcand.size(); i++) {
     std::pair<unsigned, float> top = p.top();
-    reward[top.first] =  vrcand.size() - i;
+    vreward[top.first] =  vrcand.size() - i;
     p.pop();
   }
   for (unsigned i = 0; i < cands.size(); i++) {
@@ -479,6 +487,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
   SmallVector<unsigned, 8> VRPhysRegSpillCands;
   SmallVector<unsigned, 8> PhysRegSpillCands;
   std::map<int, float> reward;
+  std::map<int, float> vreward;
 
   // Check for an available register in this class.
   AllocationOrder Order(VirtReg.reg, *VRM, RegClassInfo, Matrix);
@@ -512,10 +521,10 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
     VRPhysRegSpillCands.push_back(0);
     reward[0] = VirtReg.weight;
   }
-  calculateReward(reward, PhysRegSpillCands, VRPhysRegSpillCands, state);
-    DEBUG(llvm::dbgs() << "state done \n");
+  calculateReward(reward, vreward, PhysRegSpillCands, VRPhysRegSpillCands, state);
+  DEBUG(llvm::dbgs() << "state done \n");
   // Try to spill another interfering reg with less spill weight.
-  while (unsigned Reg = pickAction(reward, state)) {
+  while (unsigned Reg = pickAction(reward, state, vreward)) {
     DEBUG(llvm::dbgs() << "pick finish " << Reg << "\n");
     switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands, reward)) {
     case Free:
