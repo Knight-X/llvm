@@ -408,7 +408,7 @@ bool RADrl::calculateReward(std::map<int, float>& reward, std::map<int, float>& 
             return a.second < b.second;
         };
   };
-  std::priority_queue<std::pair<unsigned, float>, std::vector<std::pair<unsigned, float>>, cmp> p(reward.begin(), reward.end());
+  std::priority_queue<std::pair<unsigned, float>, std::vector<std::pair<unsigned, float>>, cmp> p(vreward.begin(), vreward.end());
 DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::dbgs() << cands[i] << " "; } dbgs() << "\n";);
 DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
   for (unsigned i = 0; i < vrcand.size(); i++) {
@@ -420,6 +420,7 @@ DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::
     reward[cands[i]] = cands.size() - i;
   }
   DEBUG(dbgs() << "rewards\n"; for (std::map<int, float>::iterator it = reward.begin(); it != reward.end(); it++) { llvm::dbgs() << "first: " << it->first << " second: " << it->second << " "; } dbgs() << "\n";);
+  DEBUG(dbgs() << "vrewards\n"; for (std::map<int, float>::iterator it = vreward.begin(); it != vreward.end(); it++) { llvm::dbgs() << "first: " << it->first << " second: " << it->second << " "; } dbgs() << "\n";);
 
   //std::string file = "go" + std::to_string(iteration) + ".txt";
   DEBUG(llvm::dbgs() << "c++: reward end \n");
@@ -506,7 +507,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
       // Only virtual registers in the way, we may be able to spill them.
       if (calculateSpillWeight(VirtReg, PhysReg, new_weight)) {
         VRPhysRegSpillCands.push_back(PhysReg);
-        reward[PhysReg] = new_weight;
+        vreward[PhysReg] = new_weight;
       }
       continue;
 
@@ -519,7 +520,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
 
     DEBUG(llvm::dbgs() << "virt self is spillable \n");
     VRPhysRegSpillCands.push_back(0);
-    reward[0] = VirtReg.weight;
+    vreward[0] = VirtReg.weight;
   }
   calculateReward(reward, vreward, PhysRegSpillCands, VRPhysRegSpillCands, state);
   DEBUG(llvm::dbgs() << "state done \n");
