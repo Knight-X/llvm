@@ -202,7 +202,7 @@ bool doFinalization(Module &M) override {
   bool calculateReward(std::map<int, float>& reward, std::map<int, float>& vreward, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, commap& state);
   bool calculateSpillWeight(LiveInterval &Virt, unsigned Phys, float &weight);
   unsigned pickAction(std::map<int, float>& reward, commap& state, std::map<int, float>&vreward );
-  int checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward);
+  int checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward, std::map<int, float>& vreward);
 
   static char ID;
 };
@@ -267,7 +267,6 @@ void RADrl::printPhysic(LiveRange& vreg, commap& state) {
     LiveRange::const_iterator LRI = vreg.begin();
     state[3333].insert(std::pair<int, int>(LRI->start.getint(), LRI->end.getint()));
     DEBUG(llvm::dbgs() << "new state: " << std::to_string(iteration) << "finish\n");
-    iteration++;
     /*for (std::map<unsigned, std::set<std::pair<int, int>>>::iterator it=store.begin(); it!=store.end(); ++it) {
         std::cout << "phys reg: " << it->first << std::endl;
 	for(auto iter : it->second) {
@@ -361,18 +360,20 @@ unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state,
 
   connect(sockfd, (struct sockaddr *)&info, sizeof(info));	
 
-  char g[11] = {};
+  //char g[11] = {};
   char receive[3] = {};
-  sprintf(g, "%d", iteration);
-  int n = send(sockfd, g, 1, 0);
+  //sprintf(g, "%d", iteration);
+  int my_iter = htonl(iteration);
+  int n = send(sockfd, (const char*)&my_iter, sizeof(my_iter), 0);
   recv(sockfd, receive, sizeof(receive), 0);
   close(sockfd);
+  iteration++;
   int j;
   sscanf(receive, "%d", &j);
   unsigned action = (unsigned)j;
   return action;
 }
-int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward) {
+int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward, std::map<int, float>& vreward) {
 DEBUG(dbgs() << "phys\n"; for (unsigned i = 0; i < cands.size(); i++) { llvm::dbgs() << cands[i] << " "; } dbgs() << "\n";);
 DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::dbgs() << vrcand[i] << " "; } dbgs() << "\n";);
  for (unsigned candsi = 0; candsi < cands.size(); candsi++) {
@@ -382,15 +383,16 @@ DEBUG(dbgs() << "virts\n"; for (unsigned i = 0; i < vrcand.size(); i++) { llvm::
 		   reward.erase(it);
 		 }
            DEBUG(llvm::dbgs() << "choose phys" << reg << "\n");
+	   cands.erase(cands.begin(),  cands.end());
 	   return Free;
 	 }
  }
 
  for (unsigned vrcandi = 0; vrcandi < vrcand.size(); vrcandi++) {
    if (vrcand[vrcandi] == reg) {
-	  std::map<int, float>::iterator it = reward.find(reg);
-	  if (it != reward.end()) {
-	    reward.erase(it);
+	  std::map<int, float>::iterator it = vreward.find(reg);
+	  if (it != vreward.end()) {
+	    vreward.erase(it);
 	   }
            DEBUG(llvm::dbgs() << "choose virts" << reg << "\n");
 	   vrcand.erase(vrcand.begin() + vrcandi);
@@ -527,7 +529,7 @@ unsigned RADrl::selectOrSplit(LiveInterval &VirtReg,
   // Try to spill another interfering reg with less spill weight.
   while (unsigned Reg = pickAction(reward, state, vreward)) {
     DEBUG(llvm::dbgs() << "pick finish " << Reg << "\n");
-    switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands, reward)) {
+    switch (checkGroup(Reg, PhysRegSpillCands, VRPhysRegSpillCands, reward, vreward)) {
     case Free:
       DEBUG(llvm::dbgs() << "check phys finish " << Reg << "\n");
       return Reg;
