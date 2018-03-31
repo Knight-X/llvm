@@ -258,14 +258,14 @@ void RADrl::printPhysic(LiveRange& vreg, commap& state) {
 	  LiveUnionI.goToBegin();
 	  while (LiveUnionI.valid()) {
 //should not have interference with start + 246, it should be total state
-	    state[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint()));
+	    state[PhysReg].insert(std::pair<int, int>(LiveUnionI.start().getint(), LiveUnionI.stop().getint() - 1));
 	    LiveUnionI++;
 	  }
         }
       }
     }
     LiveRange::const_iterator LRI = vreg.begin();
-    state[3333].insert(std::pair<int, int>(LRI->start.getint(), LRI->end.getint()));
+    state[3333].insert(std::pair<int, int>(LRI->start.getint(), LRI->end.getint() - 1));
     DEBUG(llvm::dbgs() << "new state: " << std::to_string(iteration) << "finish\n");
     /*for (std::map<unsigned, std::set<std::pair<int, int>>>::iterator it=store.begin(); it!=store.end(); ++it) {
         std::cout << "phys reg: " << it->first << std::endl;
@@ -342,13 +342,6 @@ unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state,
 		std::map<int, float>& vreward) {
   std::string file = "state.txt";
   mapToFilep(file, state, reward, vreward);
-  std::string filename = "statedone.txt";
-  std::ofstream ofile;
-  ofile.open(filename.c_str());
-  if(!ofile)
-  {
-      return false; 
-  }
   int sockfd = 0;
   sockfd = socket(AF_INET, SOCK_STREAM, 0);  
   struct sockaddr_in info;
@@ -367,10 +360,18 @@ unsigned RADrl::pickAction(std::map<int, float>& reward, commap& state,
   int n = send(sockfd, (const char*)&my_iter, sizeof(my_iter), 0);
   recv(sockfd, receive, sizeof(receive), 0);
   close(sockfd);
-  iteration++;
   int j;
   sscanf(receive, "%d", &j);
   unsigned action = (unsigned)j;
+  std::string actionfile = "action" + std::to_string(iteration) + ".txt";
+  std::ofstream ofile;
+  ofile.open(actionfile.c_str());
+  if(!ofile)
+  {
+      return false;           //file does not exist and cannot be created.
+  }
+  ofile << action;
+  iteration++;
   return action;
 }
 int RADrl::checkGroup(unsigned reg, SmallVectorImpl<unsigned>& cands, SmallVectorImpl<unsigned>& vrcand, std::map<int, float>& reward, std::map<int, float>& vreward) {
